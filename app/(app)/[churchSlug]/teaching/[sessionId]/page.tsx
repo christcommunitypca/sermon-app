@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
 import { OutlineEditor } from '@/components/teaching/OutlineEditor'
 import { SessionStatus } from '@/types/database'
-import { ChevronLeft, Edit, Truck, Tag, Clock, FileText, Presentation } from 'lucide-react'
+import { ChevronLeft, Edit, Tag, Clock, FileText, Presentation, FlaskConical } from 'lucide-react'
 import { updateSessionStatusAction } from '../actions'
 
 interface Props { params: { churchSlug: string; sessionId: string } }
@@ -99,14 +99,15 @@ export default async function SessionDetailPage({ params }: Props) {
         </div>
 
         {/* Sub-nav */}
-        <div className="flex items-center gap-1 mt-5 pt-4 border-t border-slate-100">
+        <div className="flex items-center gap-1 mt-5 pt-4 border-t border-slate-100 overflow-x-auto">
           {[
+            { href: `/${churchSlug}/teaching/${sessionId}/research`, label: 'Research', icon: FlaskConical },
             { href: `/${churchSlug}/teaching/${sessionId}/thoughts`, label: 'Thoughts', icon: FileText },
             { href: `/${churchSlug}/teaching/${sessionId}/tags`, label: 'Tags', icon: Tag },
             { href: `/${churchSlug}/teaching/${sessionId}/history`, label: 'History', icon: Clock },
           ].map(({ href, label, icon: Icon }) => (
             <Link key={href} href={href}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors">
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0">
               <Icon className="w-3.5 h-3.5" />{label}
             </Link>
           ))}

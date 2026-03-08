@@ -2,13 +2,13 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-//import { usePathname } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Role } from '@/types/database'
 import {
   BookOpen, Search, Bell, Settings, Users,
-  LogOut, Menu, X
+  LogOut, Menu, X, BookMarked
 } from 'lucide-react'
 
 interface NavItem {
@@ -28,11 +28,9 @@ interface Props {
 }
 
 export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, unreadCount }: Props) {
-  //const pathname = usePathname()
-  //const pathname = ''
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : ''
+  const pathname = usePathname()
   const router = useRouter()
-    const supabase = createClient()
+  const supabase = createClient()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const base = `/${churchSlug}`
@@ -40,6 +38,7 @@ export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, 
 
   const navItems: NavItem[] = [
     { href: `${base}/teaching`,      label: 'Teaching',       icon: <BookOpen className="w-5 h-5" /> },
+    { href: `${base}/series`,        label: 'Series',         icon: <BookMarked className="w-5 h-5" /> },
     { href: `${base}/search`,        label: 'Search',         icon: <Search className="w-5 h-5" /> },
     { href: `${base}/notifications`, label: 'Notifications',  icon: <Bell className="w-5 h-5" /> },
     { href: `${base}/settings/profile`, label: 'Settings',   icon: <Settings className="w-5 h-5" /> },

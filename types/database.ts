@@ -259,3 +259,130 @@ export interface AuditLog {
   metadata: Json
   created_at: string
 }
+
+// ── Theological tradition ──────────────────────────────────────────────────────
+
+export type TheologicalTradition =
+  | 'reformed'
+  | 'presbyterian'
+  | 'baptist'
+  | 'methodist'
+  | 'lutheran'
+  | 'anglican'
+  | 'pentecostal'
+  | 'catholic'
+  | 'eastern_orthodox'
+  | 'nondenominational'
+
+export const TRADITION_LABELS: Record<TheologicalTradition, string> = {
+  reformed: 'Reformed',
+  presbyterian: 'Presbyterian',
+  baptist: 'Baptist',
+  methodist: 'Methodist',
+  lutheran: 'Lutheran',
+  anglican: 'Anglican / Episcopal',
+  pentecostal: 'Pentecostal / Charismatic',
+  catholic: 'Catholic',
+  eastern_orthodox: 'Eastern Orthodox',
+  nondenominational: 'Non-denominational',
+}
+
+// ── Series ─────────────────────────────────────────────────────────────────────
+
+export type SeriesStatus = 'planning' | 'active' | 'completed' | 'archived'
+export type SeriesSessionStatus = 'planned' | 'created' | 'delivered'
+
+export interface Series {
+  id: string
+  church_id: string
+  teacher_id: string
+  title: string
+  description: string | null
+  scripture_section: string | null
+  total_weeks: number | null
+  start_date: string | null
+  tradition: string | null
+  status: SeriesStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface SeriesSession {
+  id: string
+  series_id: string
+  session_id: string | null
+  week_number: number
+  proposed_title: string | null
+  proposed_scripture: string | null
+  notes: string | null
+  liturgical_note: string | null
+  status: SeriesSessionStatus
+  created_at: string
+}
+
+// ── Research items ─────────────────────────────────────────────────────────────
+
+export type ResearchCategory =
+  | 'word_study'
+  | 'related_text'
+  | 'theological'
+  | 'practical'
+  | 'historical'
+  | 'denominational'
+  | 'current_topic'
+
+export type ResearchSourceType = 'ai_synthesis' | 'sourced' | 'user'
+
+export interface ResearchItem {
+  id: string
+  session_id: string
+  church_id: string
+  teacher_id: string
+  category: ResearchCategory
+  subcategory: string | null
+  title: string
+  content: string
+  source_label: string
+  source_type: ResearchSourceType
+  confidence: Confidence | null
+  is_pinned: boolean
+  is_dismissed: boolean
+  metadata: Json
+  position: number
+  created_at: string
+}
+
+// Research item metadata shapes per category
+export interface WordStudyMeta {
+  word: string
+  original_language: 'hebrew' | 'greek' | 'aramaic'
+  strongs_ref?: string
+  semantic_range?: string[]
+}
+
+export interface RelatedTextMeta {
+  ref: string
+  testament: 'old' | 'new'
+  relation_type: 'common' | 'less_common'
+}
+
+export interface PracticalItemMeta {
+  subcategory: 'application' | 'analogy' | 'insight'
+  suggested_block_type: BlockType
+}
+
+export interface TheologicalItemMeta {
+  tradition: string
+  is_cross_tradition: boolean
+}
+
+// ── AI types (shared between client and server) ────────────────────────────────
+// These are separate from server-only AI generation code.
+
+export interface ProposedWeek {
+  week_number: number
+  proposed_title: string
+  proposed_scripture: string
+  notes: string
+  liturgical_note: string | null
+}

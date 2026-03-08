@@ -43,7 +43,9 @@ export async function saveBlocksAction(
 
   if (normalized.length > 0) {
     const toInsert = normalized.map(b => ({
-      id: b.id.startsWith('local-') || b.id.startsWith('ai-') ? undefined : b.id,
+      id: (b.id.startsWith('local-') || b.id.startsWith('ai-'))
+        ? crypto.randomUUID()
+        : b.id,
       outline_id: outlineId,
       parent_id: b.parent_id,
       type: b.type,
@@ -204,6 +206,7 @@ export async function restoreSnapshotAction(
   if (restoredBlocks.length > 0) {
     await supabaseAdmin.from('outline_blocks').insert(
       restoredBlocks.map(b => ({
+        id: crypto.randomUUID(),
         outline_id: outlineId,
         parent_id: b.parent_id,
         type: b.type,

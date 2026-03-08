@@ -25,6 +25,12 @@ export default async function SeriesDetailPage({ params }: Props) {
 
   const { series, sessions } = data
 
+  // Void-returning wrapper — form action must return void, not { sessionId, error }
+  async function createWeekSession(seriesSessionId: string): Promise<void> {
+    'use server'
+    await createSessionFromSeriesWeekAction(seriesSessionId, seriesId, '', churchSlug)
+  }
+
   // Find next undelivered week
   const nextWeek = sessions.find(s => s.status !== 'delivered')
 
@@ -76,7 +82,7 @@ export default async function SeriesDetailPage({ params }: Props) {
               <p className="text-xs text-violet-600 mt-0.5">{nextWeek.proposed_scripture}</p>
             )}
           </div>
-          <form action={createSessionFromSeriesWeekAction.bind(null, nextWeek.id, seriesId, '', churchSlug)}>
+          <form action={createWeekSession.bind(null, nextWeek.id)}>
             <button type="submit"
               className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 text-white text-xs font-medium rounded-lg hover:bg-violet-700 transition-colors shrink-0">
               <Plus className="w-3.5 h-3.5" />Create session
@@ -148,7 +154,7 @@ export default async function SeriesDetailPage({ params }: Props) {
                   )}
 
                   {ss.status === 'planned' && (
-                    <form action={createSessionFromSeriesWeekAction.bind(null, ss.id, seriesId, '', churchSlug)}>
+                    <form action={createWeekSession.bind(null, ss.id)}>
                       <button type="submit"
                         className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
                         <Plus className="w-3 h-3" />Create

@@ -1,7 +1,7 @@
 import 'server-only'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decryptKey } from '@/lib/ai/key'
-import { ResearchCategory, ResearchItem } from '@/types/database'
+import { ResearchCategory, ResearchItem, Json } from '@/types/database'
 import { traditionDisplayName } from '@/lib/liturgical'
 
 export const RESEARCH_PROMPT_VERSION = 'v1.0'
@@ -123,7 +123,7 @@ Identify and study the most theologically significant words from this passage.`
       confidence: item.confidence ?? 'medium',
       is_pinned: false,
       is_dismissed: false,
-      metadata: item.metadata ?? {},
+      metadata: (item.metadata ?? {}) as Json,
       position: i,
     })),
   }
@@ -167,7 +167,7 @@ Find cross-references that would strengthen this teaching.`
       confidence: item.confidence ?? 'medium',
       is_pinned: false,
       is_dismissed: false,
-      metadata: item.metadata ?? {},
+      metadata: (item.metadata ?? {}) as Json,
       position: i,
     })),
   }
@@ -216,7 +216,7 @@ Provide theological interpretation from the ${tradName} perspective, then 2-3 co
       confidence: item.confidence ?? 'medium',
       is_pinned: false,
       is_dismissed: false,
-      metadata: item.metadata ?? {},
+      metadata: (item.metadata ?? {}) as Json,
       position: i,
     })),
   }
@@ -263,7 +263,7 @@ Generate practical preaching helps: applications, analogies, and explanatory ins
       confidence: item.confidence ?? 'medium',
       is_pinned: false,
       is_dismissed: false,
-      metadata: item.metadata ?? {},
+      metadata: (item.metadata ?? {}) as Json,
       position: i,
     })),
   }
@@ -306,7 +306,7 @@ Provide concise historical and cultural context that would practically help a pa
       confidence: item.confidence ?? 'medium',
       is_pinned: false,
       is_dismissed: false,
-      metadata: item.metadata ?? {},
+      metadata: (item.metadata ?? {}) as Json,
       position: i,
     })),
   }

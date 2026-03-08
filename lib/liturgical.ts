@@ -160,7 +160,9 @@ export function getObservancesInRange(
 ): LiturgicalObservance[] {
   const endDate = new Date(startDate.getTime() + weeks * 7 * 86400000)
 
-  const years = new Set([startDate.getFullYear(), endDate.getFullYear()])
+  const startYear = startDate.getFullYear()
+  const endYear = endDate.getFullYear()
+  const years = startYear === endYear ? [startYear] : [startYear, endYear]
   const allObs: LiturgicalObservance[] = []
   for (const year of years) {
     allObs.push(...getObservancesForYear(year))

@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+html, body {
+  overscroll-behavior: none;
+}
+
+textarea {
+  -webkit-appearance: none;
+}
+
+button, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Minimum touch target for mobile */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}

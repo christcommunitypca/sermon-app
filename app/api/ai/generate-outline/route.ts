@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateOutline } from '@/lib/ai/generate'
+import { generateOutline, AIError } from '@/lib/ai/service'
 import { getSessionWithOutline, getThoughtsForSession, ensureOutline } from '@/lib/teaching'
 
 export async function POST(req: NextRequest) {
@@ -20,16 +20,26 @@ export async function POST(req: NextRequest) {
   const outline = data.outline ?? await ensureOutline(sessionId, churchId)
   const thoughts = await getThoughtsForSession(sessionId)
 
-  const result = await generateOutline(user.id, {
-    session: data.session,
-    thoughts,
-    flowStructure,
-    outlineId: outline.id,
-  })
+  try {
+    const result = await generateOutline(user.id, {
+      session: {
+        title: data.session.title,
+        type: data.session.type,
+        scriptureRef: data.session.scripture_ref,
+        notes: data.session.notes,
+        estimatedDuration: data.session.estimated_duration,
+      },
+      thoughts: thoughts.map(t => ({ content: t.content ?? '' })),
+      flowStructure,
+      outlineId: outline.id,
+    })
 
-  if (result.error) {
-    return NextResponse.json({ error: result.error }, { status: 400 })
+    return NextResponse.json({ blocks: result.blocks, model: result.model })
+  } catch (err) {
+    if (err instanceof AIError) {
+      const status = err.code === 'key_missing' || err.code === 'key_invalid' ? 403 : 400
+      return NextResponse.json({ error: err.message }, { status })
+    }
+    throw err
   }
-
-  return NextResponse.json({ blocks: result.blocks, model: result.model })
 }

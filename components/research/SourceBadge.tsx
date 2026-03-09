@@ -1,19 +1,12 @@
 'use client'
 
-import { Sparkles, BookOpen, User, AlertTriangle } from 'lucide-react'
+import { Sparkles, BookOpen, User } from 'lucide-react'
 import { ResearchSourceType, Confidence } from '@/types/database'
 
 interface Props {
   sourceType: ResearchSourceType
   sourceLabel: string
   confidence?: Confidence | null
-  compact?: boolean
-}
-
-const CONFIDENCE_COLORS: Record<Confidence, string> = {
-  high: 'text-emerald-600',
-  medium: 'text-amber-600',
-  low: 'text-red-500',
 }
 
 const SOURCE_ICONS: Record<ResearchSourceType, typeof Sparkles> = {
@@ -22,31 +15,33 @@ const SOURCE_ICONS: Record<ResearchSourceType, typeof Sparkles> = {
   user: User,
 }
 
-const SOURCE_COLORS: Record<ResearchSourceType, string> = {
-  ai_synthesis: 'bg-violet-50 border-violet-200 text-violet-700',
-  sourced: 'bg-blue-50 border-blue-200 text-blue-700',
-  user: 'bg-slate-50 border-slate-200 text-slate-600',
+const CONFIDENCE_DOT: Record<Confidence, string> = {
+  high: 'bg-emerald-400',
+  medium: 'bg-amber-400',
+  low: 'bg-red-400',
 }
 
-export function SourceBadge({ sourceType, sourceLabel, confidence, compact = false }: Props) {
+const CONFIDENCE_LABEL: Record<Confidence, string> = {
+  high: 'High confidence',
+  medium: 'Verify independently',
+  low: 'Use with caution',
+}
+
+export function SourceBadge({ sourceType, sourceLabel, confidence }: Props) {
   const Icon = SOURCE_ICONS[sourceType]
-  const isLowConfidence = confidence === 'low'
 
   return (
     <span
-      className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded border ${SOURCE_COLORS[sourceType]}`}
-      title={`${sourceLabel}${confidence ? ` · ${confidence} confidence` : ''}`}
+      className="inline-flex items-center gap-1.5 text-xs text-slate-400"
+      title={confidence ? `${sourceLabel} · ${CONFIDENCE_LABEL[confidence]}` : sourceLabel}
     >
-      {isLowConfidence ? (
-        <AlertTriangle className="w-3 h-3 shrink-0" />
-      ) : (
-        <Icon className="w-3 h-3 shrink-0" />
-      )}
-      {!compact && (
-        <span className="truncate max-w-[160px]">{sourceLabel}</span>
-      )}
-      {confidence && !compact && (
-        <span className={`font-normal ${CONFIDENCE_COLORS[confidence]}`}>· {confidence}</span>
+      <Icon className="w-3 h-3 shrink-0" />
+      <span className="truncate max-w-[140px]">{sourceLabel}</span>
+      {confidence && (
+        <span
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${CONFIDENCE_DOT[confidence]}`}
+          title={CONFIDENCE_LABEL[confidence]}
+        />
       )}
     </span>
   )

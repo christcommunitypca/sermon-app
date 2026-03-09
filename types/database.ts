@@ -96,6 +96,8 @@ export interface Flow {
   description: string | null
   structure: FlowBlock[]
   is_default_for: SessionType | null
+  is_archived: boolean
+  archived_at: string | null
   created_at: string
   updated_at: string
 }

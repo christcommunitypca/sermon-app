@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getUserTradition } from '@/lib/research'
-import { ProposedWeek } from '@/lib/ai/series'
+import { ProposedWeek } from '@/types/database'
 import { SeriesStatus } from '@/types/database'
 import { ensureOutline } from '@/lib/teaching'
 
@@ -170,12 +170,61 @@ export async function createSessionFromSeriesWeekAction(
   return { sessionId: session.id }
 }
 
+// ── Archive series ─────────────────────────────────────────────────────────────
+export async function archiveSeriesAction(
+  seriesId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthUser()
+
+  const { error } = await supabaseAdmin
+    .from('series')
+    .update({ status: 'archived', updated_at: new Date().toISOString() })
+    .eq('id', seriesId)
+    .eq('teacher_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/${churchSlug}/series`)
+  return {}
+}
+
+// ── Unarchive series ───────────────────────────────────────────────────────────
+export async function unarchiveSeriesAction(
+  seriesId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthUser()
+
+  const { error } = await supabaseAdmin
+    .from('series')
+    .update({ status: 'planning', updated_at: new Date().toISOString() })
+    .eq('id', seriesId)
+    .eq('teacher_id', user.id)
+    .eq('status', 'archived')
+
+  if (error) return { error: error.message }
+  revalidatePath(`/${churchSlug}/series`)
+  return {}
+}
+
 // ── Delete series ──────────────────────────────────────────────────────────────
+// Must be archived first. Cascades to series_sessions (FK on delete cascade).
 export async function deleteSeriesAction(
   seriesId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
   const user = await getAuthUser()
+
+  const { data: series } = await supabaseAdmin
+    .from('series')
+    .select('status, teacher_id')
+    .eq('id', seriesId)
+    .single()
+
+  if (!series || series.teacher_id !== user.id) return { error: 'Not found' }
+  if (series.status !== 'archived') {
+    return { error: 'Archive this series before deleting it.' }
+  }
 
   await supabaseAdmin
     .from('series')

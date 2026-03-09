@@ -57,24 +57,27 @@ export function SeriesPlanner({ churchId, churchSlug, formData, initialWeeks, ob
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">{formData.title}</h2>
           <p className="text-sm text-slate-500">{formData.scriptureSection} · {formData.totalWeeks} weeks</p>
         </div>
-        <div className="flex items-center gap-3">
-          {error && <span className="text-sm text-red-600">{error}</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving…' : 'Save series'}
-          </button>
-        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving…' : 'Save series'}
+        </button>
       </div>
 
-      <p className="text-xs text-slate-400 mb-5">Review and edit the proposed plan below. You can adjust titles, scriptures, and notes before saving.</p>
+      {error && (
+        <div className="flex items-center gap-2 px-3 py-2.5 mb-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 shrink-0" />{error}
+        </div>
+      )}
+
+      <p className="text-xs text-slate-400 mb-5">Review and edit the proposed plan. Adjust titles, scriptures, and notes before saving.</p>
 
       <div className="space-y-3">
         {weeks.map(week => {
@@ -115,12 +118,32 @@ export function SeriesPlanner({ churchId, churchSlug, formData, initialWeeks, ob
                     <Calendar className="w-3 h-3" />{weekDate}
                   </span>
                 )}
-                <button
-                  onClick={() => setEditingWeek(isEditing ? null : week.week_number)}
-                  className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 rounded transition-colors"
-                >
-                  {isEditing ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Edit2 className="w-3.5 h-3.5" />}
-                </button>
+                {isEditing ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setEditingWeek(null)}
+                      title="Done"
+                      className="p-1.5 text-emerald-600 hover:text-emerald-800 rounded transition-colors"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setEditingWeek(null)}
+                      title="Cancel"
+                      className="p-1.5 text-slate-400 hover:text-red-500 rounded transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setEditingWeek(week.week_number)}
+                    className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 rounded transition-colors"
+                    title="Edit week"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               {/* Week body */}
@@ -167,16 +190,6 @@ export function SeriesPlanner({ churchId, churchSlug, formData, initialWeeks, ob
             </div>
           )
         })}
-      </div>
-
-      <div className="mt-6 flex justify-end">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-6 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
-        >
-          {saving ? 'Saving series…' : 'Save series'}
-        </button>
       </div>
     </div>
   )

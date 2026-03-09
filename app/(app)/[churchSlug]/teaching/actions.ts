@@ -127,9 +127,79 @@ export async function updateSessionStatusAction(
   revalidatePath(`/${churchSlug}/teaching`)
 }
 
-// ── Delete session ─────────────────────────────────────────────────────────────
-export async function deleteSessionAction(sessionId: string, churchId: string, churchSlug: string) {
+// ── Archive session ────────────────────────────────────────────────────────────
+// Archive is the primary removal action. Sets status to 'archived'.
+export async function archiveSessionAction(
+  sessionId: string,
+  churchId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
   const user = await getAuthContext()
+
+  const { error } = await supabaseAdmin
+    .from('teaching_sessions')
+    .update({ status: 'archived', updated_at: new Date().toISOString() })
+    .eq('id', sessionId)
+    .eq('teacher_id', user.id)
+
+  if (error) return { error: error.message }
+
+  void writeAuditLog({
+    churchId,
+    actorUserId: user.id,
+    action: AUDIT_ACTIONS.SESSION_STATUS_CHANGED,
+    entityType: 'session',
+    entityId: sessionId,
+    metadata: { new_status: 'archived' },
+  })
+
+  revalidatePath(`/${churchSlug}/teaching`)
+  revalidatePath(`/${churchSlug}/teaching/${sessionId}`)
+  return {}
+}
+
+// ── Unarchive session ──────────────────────────────────────────────────────────
+export async function unarchiveSessionAction(
+  sessionId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthContext()
+
+  const { error } = await supabaseAdmin
+    .from('teaching_sessions')
+    .update({ status: 'draft', updated_at: new Date().toISOString() })
+    .eq('id', sessionId)
+    .eq('teacher_id', user.id)
+    .eq('status', 'archived')   // only unarchive if actually archived
+
+  if (error) return { error: error.message }
+
+  revalidatePath(`/${churchSlug}/teaching`)
+  revalidatePath(`/${churchSlug}/teaching/${sessionId}`)
+  return {}
+}
+
+// ── Delete session ─────────────────────────────────────────────────────────────
+// Delete is restricted: session must be archived first.
+// This enforces the archive-before-delete pattern.
+export async function deleteSessionAction(
+  sessionId: string,
+  churchId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthContext()
+
+  // Verify session is archived before allowing deletion
+  const { data: session } = await supabaseAdmin
+    .from('teaching_sessions')
+    .select('status, teacher_id')
+    .eq('id', sessionId)
+    .single()
+
+  if (!session || session.teacher_id !== user.id) return { error: 'Not found' }
+  if (session.status !== 'archived') {
+    return { error: 'Archive this session before deleting it.' }
+  }
 
   const { error } = await supabaseAdmin
     .from('teaching_sessions')
@@ -137,7 +207,7 @@ export async function deleteSessionAction(sessionId: string, churchId: string, c
     .eq('id', sessionId)
     .eq('teacher_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) return { error: error.message }
 
   void writeAuditLog({
     churchId,
@@ -145,7 +215,9 @@ export async function deleteSessionAction(sessionId: string, churchId: string, c
     action: AUDIT_ACTIONS.SESSION_DELETED,
     entityType: 'session',
     entityId: sessionId,
+    metadata: { was_archived: true },
   })
 
   redirect(`/${churchSlug}/teaching`)
 }
+

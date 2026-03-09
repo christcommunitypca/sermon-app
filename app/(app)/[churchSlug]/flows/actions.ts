@@ -48,7 +48,7 @@ export async function updateFlowAction(
   churchSlug: string,
   updates: {
     name?: string
-    description?: string
+    description?: string | null
     structure?: FlowBlock[]
     is_default_for?: SessionType | null
   }
@@ -68,8 +68,52 @@ export async function updateFlowAction(
   return {}
 }
 
+export async function archiveFlowAction(
+  flowId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthUser()
+
+  const { error } = await supabaseAdmin
+    .from('flows')
+    .update({ is_archived: true, archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', flowId)
+    .eq('teacher_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/${churchSlug}/flows`)
+  return {}
+}
+
+export async function unarchiveFlowAction(
+  flowId: string,
+  churchSlug: string
+): Promise<{ error?: string }> {
+  const user = await getAuthUser()
+
+  const { error } = await supabaseAdmin
+    .from('flows')
+    .update({ is_archived: false, archived_at: null, updated_at: new Date().toISOString() })
+    .eq('id', flowId)
+    .eq('teacher_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/${churchSlug}/flows`)
+  return {}
+}
+
 export async function deleteFlowAction(flowId: string, churchId: string, churchSlug: string) {
   const user = await getAuthUser()
+
+  // Verify flow is archived before allowing deletion
+  const { data: flow } = await supabaseAdmin
+    .from('flows')
+    .select('is_archived, teacher_id')
+    .eq('id', flowId)
+    .single()
+
+  if (!flow || flow.teacher_id !== user.id) return
+  if (!flow.is_archived) return  // silent guard — UI should only call this on archived flows
 
   await supabaseAdmin
     .from('flows')

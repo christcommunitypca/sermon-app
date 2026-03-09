@@ -1,55 +1,56 @@
-# Iteration 2 — MANIFEST
+# Iteration 2d — Hardening Pass MANIFEST
 
-## Added files
+## Changed files (9 files)
 
-### Database
-- `supabase/migrations/005_series_research.sql`
+### components/research/ResearchItem.tsx
+- `getPushContent`: word_study pushes English word title; theological pushes tradition label title — not paragraphs
+- `isLong` derived as constant (was checked twice in JSX)
+- `metaConnectionType` extracted and rendered as connection type chip on cross-ref cards
+- Practical subcategory badge (Application / Analogy / Insight) shown above title
+- Word study semantic range chips stack on new lines (flex-wrap, no overflow)
+- All `meta.x` accesses use pre-typed variables — no `unknown` in JSX
 
-### Types
-- `types/database.ts` — **modified** (added TheologicalTradition, Series, SeriesSession, ResearchItem, ProposedWeek, and related types)
+### components/research/ResearchWorkspace.tsx
+- Removed `useCallback` import (unused after simplification)
+- `countByCategory` replaced with `categoryCounts` derived object (one pass, not per-tab call)
+- Tab bar uses `scrollbar-none` CSS class instead of `style={{ scrollbarWidth: 'none' }}` — Safari compatible
 
-### Lib
-- `lib/liturgical.ts` — pure liturgical calendar computations (client-safe)
-- `lib/research.ts` — server-side research data helpers
-- `lib/series.ts` — server-side series data helpers
-- `lib/ai/research.ts` — AI research generation (word studies, cross-refs, theological, practical, historical)
-- `lib/ai/series.ts` — AI series plan generation
+### components/series/SeriesPlanner.tsx
+- Duplicate bottom "Save series" button removed
+- Error moved out of header into proper error banner below header
+- Inline edit now has separate ✓ Done and ✗ Cancel buttons — no accidental edit loss
 
-### API routes
-- `app/api/ai/research/route.ts`
-- `app/api/ai/series/route.ts`
+### components/series/NewSeriesForm.tsx
+- Non-AI users no longer blocked: "Plan manually" button creates blank week stubs and opens SeriesPlanner directly
+- AI key prompt changed from blocking notice to inline hint alongside the manual button
 
-### Server actions
-- `app/(app)/[churchSlug]/teaching/[sessionId]/research-actions.ts`
-- `app/(app)/[churchSlug]/series/actions.ts`
+### components/series/SeriesWeekExpander.tsx
+- `statusStyles` prop removed — defined as static constant inside component
+- `Props` interface simplified
 
-### Pages (new)
-- `app/(app)/[churchSlug]/teaching/[sessionId]/research/page.tsx`
-- `app/(app)/[churchSlug]/series/page.tsx`
-- `app/(app)/[churchSlug]/series/new/page.tsx`
-- `app/(app)/[churchSlug]/series/[seriesId]/page.tsx`
-- `app/(app)/[churchSlug]/settings/tradition/page.tsx`
+### app/(app)/[churchSlug]/series/[seriesId]/page.tsx
+- `STATUS_STYLES` constant removed (moved into SeriesWeekExpander)
+- `SeriesSessionStatus` and `Flame` imports removed (no longer used here)
+- `statusStyles` prop removed from all SeriesWeekExpander usages
 
-### Components (new)
-- `components/research/SourceBadge.tsx`
-- `components/research/ResearchItem.tsx`
-- `components/research/ResearchWorkspace.tsx`
-- `components/series/NewSeriesForm.tsx`
-- `components/series/SeriesPlanner.tsx`
-- `components/settings/TraditionForm.tsx`
+### components/ui/ArchiveDeleteMenu.tsx
+- Trigger button: `min-h-[44px] min-w-[44px]` with flex centering — meets iOS 44px touch target
+- `iconSize` variable removed, icon size inlined directly
 
----
+### lib/ai/service.ts
+- `buildSourceLabel` parameter type changed from anonymous `{ subcategory?: string; metadata?: Record<string, unknown> }` to explicit nullable fields — cleaner, matches actual RawItem shape
 
-## Modified files
+### app/globals.css
+- `scrollbar-none` utility already added in previous pass — confirmed present
 
-- `types/database.ts` — new types appended at end
-- `app/(app)/[churchSlug]/teaching/[sessionId]/page.tsx` — Research added to session sub-nav
-- `app/(app)/[churchSlug]/settings/profile/page.tsx` — settings nav + tradition link added
-- `components/layout/AppNav.tsx` — Series added to nav
-- `lib/ai/series.ts` — ProposedWeek moved to types/database; re-exported here
-
----
+## New files
+None.
 
 ## Deleted files
-
 None.
+
+## Database / migrations
+None. No schema changes.
+
+## TypeScript errors fixed
+None introduced. Pre-existing "Cannot find module 'next'" errors are a node_modules environment issue, present on all files before this pass.

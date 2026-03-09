@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
 import { OutlineEditor } from '@/components/teaching/OutlineEditor'
+import { SessionDetailActions } from '@/components/teaching/SessionDetailActions'
 import { SessionStatus } from '@/types/database'
 import { ChevronLeft, Edit, Tag, Clock, FileText, Presentation, FlaskConical } from 'lucide-react'
 import { updateSessionStatusAction } from '../actions'
@@ -31,7 +32,6 @@ export default async function SessionDetailPage({ params }: Props) {
   let { outline } = data
   if (!outline) outline = await ensureOutline(sessionId, church.id)
 
-  // Check if teacher has a valid AI key
   const { data: aiKey } = await supabaseAdmin
     .from('user_ai_keys')
     .select('validation_status')
@@ -39,16 +39,16 @@ export default async function SessionDetailPage({ params }: Props) {
     .single()
   const hasValidAIKey = aiKey?.validation_status === 'valid'
 
-  // Get default flow if session type matches one
   const { data: flows } = await supabaseAdmin
     .from('flows')
     .select('*')
     .eq('church_id', church.id)
     .eq('teacher_id', user.id)
+    .eq('is_archived', false)
 
   const matchingFlow = flows?.find(f => f.is_default_for === session.type)
-
-  const nextStatus = STATUS_NEXT[session.status]
+  const nextStatus = STATUS_NEXT[session.status as SessionStatus]
+  const isArchived = session.status === 'archived'
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -58,22 +58,38 @@ export default async function SessionDetailPage({ params }: Props) {
           <ChevronLeft className="w-4 h-4" />Teaching
         </Link>
         <div className="flex items-center gap-2">
-          {nextStatus && (
+          {nextStatus && !isArchived && (
             <form action={updateSessionStatusAction.bind(null, sessionId, church.id, churchSlug, nextStatus.next)}>
               <button type="submit" className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
                 {nextStatus.label}
               </button>
             </form>
           )}
-          <Link href={`/${churchSlug}/deliver/${sessionId}`}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">
-            <Presentation className="w-3.5 h-3.5" />Deliver
-          </Link>
+          {!isArchived && (
+            <Link href={`/${churchSlug}/deliver/${sessionId}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">
+              <Presentation className="w-3.5 h-3.5" />Deliver
+            </Link>
+          )}
+          <SessionDetailActions
+            sessionId={sessionId}
+            churchId={church.id}
+            churchSlug={churchSlug}
+            isArchived={isArchived}
+          />
         </div>
       </div>
 
+      {/* Archived banner */}
+      {isArchived && (
+        <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-600">
+          <span>This session is archived.</span>
+          <span className="text-stone-400">It won't appear in your active session list.</span>
+        </div>
+      )}
+
       {/* Session header */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6">
+      <div className={`bg-white border rounded-2xl p-6 mb-6 ${isArchived ? 'border-stone-200 opacity-80' : 'border-slate-200'}`}>
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-slate-900 mb-1">{session.title}</h1>
@@ -86,16 +102,19 @@ export default async function SessionDetailPage({ params }: Props) {
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                 session.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                 session.status === 'published' ? 'bg-blue-100 text-blue-700' :
+                session.status === 'archived' ? 'bg-stone-100 text-stone-500' :
                 'bg-slate-100 text-slate-600'
               }`}>{session.status}</span>
             </div>
             {session.notes && <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap">{session.notes}</p>}
           </div>
-          <Link href={`/${churchSlug}/teaching/${sessionId}/edit`}
-            className="shrink-0 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            title="Edit session details">
-            <Edit className="w-4 h-4" />
-          </Link>
+          {!isArchived && (
+            <Link href={`/${churchSlug}/teaching/${sessionId}/edit`}
+              className="shrink-0 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Edit session details">
+              <Edit className="w-4 h-4" />
+            </Link>
+          )}
         </div>
 
         {/* Sub-nav */}
@@ -115,7 +134,7 @@ export default async function SessionDetailPage({ params }: Props) {
       </div>
 
       {/* Outline editor */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+      <div className={`bg-white border border-slate-200 rounded-2xl p-6 ${isArchived ? 'opacity-70 pointer-events-none' : ''}`}>
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Outline</h2>
         <OutlineEditor
           outlineId={outline.id}

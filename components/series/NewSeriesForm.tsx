@@ -182,17 +182,7 @@ export function NewSeriesForm({ churchId, churchSlug, hasValidAIKey, tradition }
           </div>
         )}
 
-        {!hasValidAIKey && (
-          <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600">
-            Add an AI key in{' '}
-            <a href={`/${churchSlug}/settings/ai`} className="text-violet-600 hover:underline">
-              Settings → AI
-            </a>{' '}
-            to generate a series plan automatically.
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex items-center gap-3 pt-2 flex-wrap">
           {hasValidAIKey ? (
             <button
               onClick={handleGenerate}
@@ -203,12 +193,37 @@ export function NewSeriesForm({ churchId, churchSlug, hasValidAIKey, tradition }
               {generating ? 'Planning…' : 'Generate plan'}
             </button>
           ) : (
-            <button disabled className="px-5 py-2.5 bg-slate-200 text-slate-400 text-sm font-medium rounded-lg cursor-not-allowed">
-              Generate plan
+            // No AI key: let them enter weeks manually by going straight to the planner
+            <button
+              onClick={() => {
+                if (!canGenerate) return
+                const n = parseInt(form.totalWeeks)
+                const blank: ProposedWeek[] = Array.from({ length: n }, (_, i) => ({
+                  week_number: i + 1,
+                  proposed_title: `Week ${i + 1}`,
+                  proposed_scripture: '',
+                  notes: '',
+                  liturgical_note: null,
+                }))
+                setProposedWeeks(blank)
+              }}
+              disabled={!canGenerate}
+              className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
+            >
+              Plan manually
             </button>
           )}
           {generating && (
             <span className="text-xs text-slate-400 animate-pulse">Generating {form.totalWeeks}-week plan…</span>
+          )}
+          {!hasValidAIKey && (
+            <p className="text-xs text-slate-400">
+              Or{' '}
+              <a href={`/${churchSlug}/settings/ai`} className="text-violet-600 hover:underline">
+                add an AI key
+              </a>{' '}
+              to generate automatically.
+            </p>
           )}
         </div>
       </div>

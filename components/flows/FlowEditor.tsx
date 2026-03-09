@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { FlowBlock, SessionType, BlockType } from '@/types/database'
-import { updateFlowAction, deleteFlowAction } from '../../app/(app)/[churchSlug]/flows/actions'
+import { updateFlowAction, archiveFlowAction } from '@/app/(app)/[churchSlug]/flows/actions'
 
 const BLOCK_TYPES: { value: BlockType; label: string }[] = [
   { value: 'point', label: 'Point' },
@@ -37,7 +37,7 @@ export function FlowEditor({ flowId, churchSlug, initialName, initialDescription
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
 
   async function handleSave() {
     setSaving(true)
@@ -45,7 +45,7 @@ export function FlowEditor({ flowId, churchSlug, initialName, initialDescription
     setError(null)
     const result = await updateFlowAction(flowId, churchSlug, {
       name: name.trim(),
-      description: description.trim() || undefined,
+      description: description.trim() || null,
       structure,
       is_default_for: (defaultFor as SessionType) || null,
     })
@@ -173,23 +173,23 @@ export function FlowEditor({ flowId, churchSlug, initialName, initialDescription
         </div>
 
         <div>
-          {confirmDelete ? (
+          {confirmArchive ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Delete this flow?</span>
+              <span className="text-xs text-slate-500">Archive this flow?</span>
               <button
-                onClick={() => deleteFlowAction(flowId, '', churchSlug)}
-                className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                onClick={() => archiveFlowAction(flowId, churchSlug)}
+                className="px-3 py-1.5 text-xs font-medium bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition-colors"
               >
-                Yes, delete
+                Yes, archive
               </button>
-              <button onClick={() => setConfirmDelete(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+              <button onClick={() => setConfirmArchive(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
             </div>
           ) : (
             <button
-              onClick={() => setConfirmDelete(true)}
-              className="text-sm text-red-400 hover:text-red-600 transition-colors"
+              onClick={() => setConfirmArchive(true)}
+              className="text-sm text-slate-400 hover:text-slate-600 transition-colors"
             >
-              Delete flow
+              Archive flow
             </button>
           )}
         </div>

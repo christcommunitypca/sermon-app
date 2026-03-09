@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { getResearchItemsForSession, getUserTradition } from '@/lib/research'
+import { getResearchItemsForSession } from '@/lib/research'
 import { ResearchWorkspace } from '@/components/research/ResearchWorkspace'
 import { ChevronLeft } from 'lucide-react'
 
@@ -33,18 +33,15 @@ export default async function ResearchPage({ params }: Props) {
   const items = await getResearchItemsForSession(sessionId, user.id)
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <Link href={`/${churchSlug}/teaching/${sessionId}`}
-        className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 mb-6 transition-colors">
-        <ChevronLeft className="w-4 h-4" />{session.title}
-      </Link>
+    <div className="max-w-3xl mx-auto px-4 py-6">
+      <div className="flex items-center justify-between mb-6">
+        <Link href={`/${churchSlug}/teaching/${sessionId}`}
+          className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors">
+          <ChevronLeft className="w-4 h-4" />{session.title}
+        </Link>
+      </div>
 
-      <h1 className="text-2xl font-bold text-slate-900 mb-2">Research</h1>
-      <p className="text-sm text-slate-400 mb-8">
-        AI-assisted tools to deepen your understanding. Results are saved and can be pushed to your outline.
-      </p>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6">
         <ResearchWorkspace
           sessionId={sessionId}
           churchId={church.id}

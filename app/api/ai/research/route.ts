@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { generateResearchCategory } from '@/lib/ai/research'
+import { generateResearch, AIError } from '@/lib/ai/service'
 import { saveResearchItems, getUserTradition } from '@/lib/research'
-import { ResearchCategory } from '@/types/database'
+import type { ResearchCategory } from '@/types/database'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'sessionId, churchId, and category are required' }, { status: 400 })
   }
 
-  // Fetch session to build context
   const { data: session } = await supabaseAdmin
     .from('teaching_sessions')
     .select('title, type, scripture_ref, notes')
@@ -30,17 +29,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Session must have a scripture reference for research.' }, { status: 400 })
   }
 
-  const tradition = await getUserTradition(user.id)
-
-  const ctx = {
-    scriptureRef: session.scripture_ref,
-    sessionTitle: session.title,
-    sessionType: session.type,
-    sessionNotes: session.notes,
-    tradition,
-  }
-
-  // If replaceExisting, delete old items for this category first
   if (replaceExisting) {
     await supabaseAdmin
       .from('research_items')
@@ -49,17 +37,29 @@ export async function POST(req: NextRequest) {
       .eq('category', category)
   }
 
-  const result = await generateResearchCategory(user.id, category as ResearchCategory, ctx)
+  const tradition = await getUserTradition(user.id)
 
-  if (result.error) {
-    return NextResponse.json({ error: result.error }, { status: 400 })
+  try {
+    const result = await generateResearch(user.id, {
+      scriptureRef: session.scripture_ref,
+      sessionTitle: session.title,
+      sessionType: session.type,
+      sessionNotes: session.notes,
+      tradition,
+      category: category as ResearchCategory,
+    })
+
+    if (!result.items.length) {
+      return NextResponse.json({ items: [], model: result.model })
+    }
+
+    const saved = await saveResearchItems(sessionId, churchId, user.id, category, result.items)
+    return NextResponse.json({ items: saved, model: result.model })
+  } catch (err) {
+    if (err instanceof AIError) {
+      const status = err.code === 'key_missing' || err.code === 'key_invalid' ? 403 : 400
+      return NextResponse.json({ error: err.message }, { status })
+    }
+    throw err
   }
-
-  if (!result.items.length) {
-    return NextResponse.json({ items: [], model: result.model })
-  }
-
-  const saved = await saveResearchItems(sessionId, churchId, user.id, category, result.items)
-
-  return NextResponse.json({ items: saved, model: result.model })
 }

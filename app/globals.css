@@ -23,3 +23,12 @@ button, [role="button"] {
   min-height: 44px;
   min-width: 44px;
 }
+
+/* Hide scrollbars cross-browser (Safari needs the webkit pseudo-element) */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

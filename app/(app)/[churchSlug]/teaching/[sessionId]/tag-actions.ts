@@ -1,16 +1,9 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import { getActionUser } from '@/lib/supabase/auth-context'
 
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
+import { revalidatePath } from 'next/cache'
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export async function addTagToSessionAction(
   sessionId: string,
@@ -18,7 +11,8 @@ export async function addTagToSessionAction(
   tagId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { data: session } = await supabaseAdmin
     .from('teaching_sessions')
@@ -47,7 +41,8 @@ export async function removeTagFromSessionAction(
   sessionId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { data: ct } = await supabaseAdmin
     .from('content_tags')
@@ -70,7 +65,7 @@ export async function createTagAction(
   label: string,
   churchSlug: string
 ): Promise<{ tagId?: string; error?: string }> {
-  await getAuthUser()
+  await getActionUser()
 
   const slug = label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
 

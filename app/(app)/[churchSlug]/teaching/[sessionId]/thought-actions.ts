@@ -1,16 +1,10 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
+
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
 
 export async function addTextThoughtAction(
   sessionId: string,
@@ -18,7 +12,8 @@ export async function addTextThoughtAction(
   churchSlug: string,
   content: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify session ownership
   const { data: session } = await supabaseAdmin
@@ -51,7 +46,8 @@ export async function addAudioThoughtAction(
   fileSizeBytes: number,
   durationSeconds: number | null
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { data: session } = await supabaseAdmin
     .from('teaching_sessions')
@@ -81,7 +77,8 @@ export async function deleteThoughtAction(
   sessionId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify via session ownership
   const { data: thought } = await supabaseAdmin

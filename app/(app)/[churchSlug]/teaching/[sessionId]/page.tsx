@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
@@ -6,6 +6,8 @@ import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
 import { OutlineEditor } from '@/components/teaching/OutlineEditor'
 import { SessionDetailActions } from '@/components/teaching/SessionDetailActions'
 import { SessionStatus } from '@/types/database'
+import { hasValidKey } from '@/lib/ai/key'
+import { getActiveProviderName } from '@/lib/ai/providers/resolver'
 import { ChevronLeft, Edit, Tag, Clock, FileText, Presentation, FlaskConical } from 'lucide-react'
 import { updateSessionStatusAction } from '../actions'
 
@@ -19,8 +21,9 @@ const STATUS_NEXT: Partial<Record<SessionStatus, { label: string; next: SessionS
 export default async function SessionDetailPage({ params }: Props) {
   const { churchSlug, sessionId } = params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
   if (!church) return notFound()
@@ -32,12 +35,7 @@ export default async function SessionDetailPage({ params }: Props) {
   let { outline } = data
   if (!outline) outline = await ensureOutline(sessionId, church.id)
 
-  const { data: aiKey } = await supabaseAdmin
-    .from('user_ai_keys')
-    .select('validation_status')
-    .eq('user_id', user.id)
-    .single()
-  const hasValidAIKey = aiKey?.validation_status === 'valid'
+  const hasValidAIKey = await hasValidKey(user.id, getActiveProviderName())
 
   const { data: flows } = await supabaseAdmin
     .from('flows')

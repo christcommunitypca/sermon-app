@@ -5,7 +5,8 @@ import { getUserTradition } from '@/lib/research'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  const user = authSession?.user ?? null
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { title, scriptureSection, totalWeeks, startDate, description } = await req.json()

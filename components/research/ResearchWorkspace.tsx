@@ -1,5 +1,7 @@
 'use client'
 
+import { generateResearchAction } from '@/app/actions/ai'
+
 import { useState } from 'react'
 import {
   BookText, Network, Church, Lightbulb, History,
@@ -60,16 +62,17 @@ export function ResearchWorkspace({
     setGenerating(activeTab)
     setError(null)
 
-    const res = await fetch('/api/ai/research', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, churchId, category: activeTab, replaceExisting: replace }),
-    })
-
-    const data = await res.json()
+    let data: Awaited<ReturnType<typeof generateResearchAction>>
+    try {
+      data = await generateResearchAction({ sessionId, churchId, category: activeTab, replaceExisting: replace })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Generation failed. Try again.')
+      setGenerating(null)
+      return
+    }
     setGenerating(null)
 
-    if (!res.ok || data.error) {
+    if (data.error || !data.items) {
       setError(data.error ?? 'Generation failed. Try again.')
       return
     }

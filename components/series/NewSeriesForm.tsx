@@ -1,5 +1,7 @@
 'use client'
 
+import { generateSeriesAction } from '@/app/actions/ai'
+
 import { useState } from 'react'
 import { ChevronLeft, Sparkles, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
@@ -52,25 +54,23 @@ export function NewSeriesForm({ churchId, churchSlug, hasValidAIKey, tradition }
       setObservances(obs)
     }
 
-    const res = await fetch('/api/ai/series', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    try {
+      const data = await generateSeriesAction({
         title: form.title,
         scriptureSection: form.scriptureSection,
         totalWeeks: parseInt(form.totalWeeks),
         startDate: form.startDate || null,
         description: form.description || null,
-      }),
-    })
-
-    const data = await res.json()
-    setGenerating(false)
-
-    if (!res.ok || data.error) {
-      setError(data.error ?? 'Generation failed')
-    } else {
-      setProposedWeeks(data.weeks)
+      })
+      if (data.error || !data.weeks) {
+        setError(data.error ?? 'Generation failed')
+      } else {
+        setProposedWeeks(data.weeks)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Generation failed')
+    } finally {
+      setGenerating(false)
     }
   }
 

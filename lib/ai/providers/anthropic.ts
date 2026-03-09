@@ -1,30 +1,101 @@
-// ── lib/ai/providers/anthropic.ts ────────────────────────────────────────────
-// Anthropic (Claude) provider — STUB.
-// TODO: Implement when Anthropic support is added.
+// ── lib/ai/providers/anthropic.ts ─────────────────────────────────────────────
+// Anthropic (Claude) implementation of AIProvider.
+// Responsibility: HTTP call to Anthropic messages API, JSON extraction,
+// and error normalization into AIError.
+// No business logic. No prompt construction. No result mapping.
 //
-// Implementation notes for when this is built:
-// - API base: https://api.anthropic.com/v1/messages
-// - Auth header: x-api-key (not Authorization: Bearer)
-// - Requires: anthropic-version header (e.g. "2023-06-01")
-// - System prompt: top-level `system` field, not in messages array
+// API notes:
+// - Base: https://api.anthropic.com/v1/messages
+// - Auth: x-api-key header (not Authorization: Bearer)
+// - Version header: anthropic-version: 2023-06-01
+// - System prompt: top-level `system` field, not inside messages array
 // - Response: content[0].type === 'text', content[0].text
-// - Model names: claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5, etc.
-// - Rate limit errors: 429 with retry-after header
-// - Key validation endpoint: GET /v1/models or attempt a minimal completion
+// - Key prefix: sk-ant-
 
 import type { AIProvider, PromptPayload, ProviderCredentials, ProviderCompletion } from '@/lib/ai/types'
 import { AIError } from '@/lib/ai/types'
+
+const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
+const ANTHROPIC_VERSION = '2023-06-01'
 
 export class AnthropicProvider implements AIProvider {
   readonly name = 'anthropic' as const
 
   async complete(
-    _prompt: PromptPayload,
-    _creds: ProviderCredentials
+    prompt: PromptPayload,
+    creds: ProviderCredentials
   ): Promise<ProviderCompletion> {
-    throw new AIError(
-      'provider_unavailable',
-      'Anthropic provider is not yet implemented. Set provider to "openai" in resolver.ts.'
-    )
+    const start = Date.now()
+
+    let res: Response
+    try {
+      res = await fetch(ANTHROPIC_MESSAGES_URL, {
+        method: 'POST',
+        headers: {
+          'x-api-key': creds.apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: creds.model,
+          max_tokens: prompt.maxTokens ?? 2000,
+          temperature: prompt.temperature ?? 0.4,
+          system: prompt.system,
+          messages: [
+            { role: 'user', content: prompt.user },
+          ],
+        }),
+      })
+    } catch (err) {
+      throw new AIError(
+        'provider_unavailable',
+        `Anthropic request failed: ${err instanceof Error ? err.message : 'Network error'}`
+      )
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as {
+        error?: { type?: string; message?: string }
+      }
+      const msg = body?.error?.message ?? `HTTP ${res.status}`
+
+      if (res.status === 401) {
+        throw new AIError('key_invalid', `Anthropic rejected the API key: ${msg}`)
+      }
+      if (res.status === 429) {
+        throw new AIError('provider_unavailable', `Anthropic rate limit reached: ${msg}`)
+      }
+      if (res.status === 400) {
+        throw new AIError('generation_failed', `Anthropic bad request: ${msg}`)
+      }
+      throw new AIError('generation_failed', `Anthropic error: ${msg}`)
+    }
+
+    const data = await res.json() as {
+      content?: { type: string; text?: string }[]
+      model?: string
+    }
+
+    const raw = data.content?.find(b => b.type === 'text')?.text ?? ''
+
+    // Strip markdown fences if the model wraps its JSON response
+    const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(cleaned)
+    } catch {
+      throw new AIError(
+        'malformed_response',
+        `Could not parse Anthropic response as JSON. Raw: ${cleaned.slice(0, 200)}`
+      )
+    }
+
+    return {
+      parsed,
+      model: data.model ?? creds.model,
+      provider: 'anthropic',
+      duration_ms: Date.now() - start,
+    }
   }
 }

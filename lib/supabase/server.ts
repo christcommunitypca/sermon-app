@@ -13,13 +13,11 @@ export async function createClient() {
           return cookieStore.getAll()
         },
         setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          } catch {
-            // setAll called from a Server Component — safe to ignore
-          }
+          // No try/catch: cookie writes must succeed in server actions and route handlers.
+          // Server components are read-only but they never call auth methods that write cookies.
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
         },
       },
     }

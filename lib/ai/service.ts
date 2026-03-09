@@ -1,22 +1,25 @@
 // ── lib/ai/service.ts ─────────────────────────────────────────────────────────
 // The ONLY import target for AI features in the rest of the app.
-// App code imports from here — never from providers/, prompts/, or generate.ts.
+// App code imports from here — never from providers/, prompts/, or key.ts.
 //
 // Responsibilities:
-// 1. Resolve user credentials (key decryption, validation check)
+// 1. Resolve user credentials via key.ts (decryption, validation check)
 // 2. Build prompt via appropriate prompt module
 // 3. Call provider.complete()
 // 4. Map raw parsed response to typed app-level result
 // 5. Normalize all errors to AIError
 //
-// Logging hooks are in place (console.info) for easy upgrade to a real
-// observability system later without changing callers.
+// CREDENTIAL RESOLUTION ORDER:
+//   1. AI_PROVIDER env var → selects active provider (default: 'openai')
+//   2. user_ai_credentials WHERE (user_id, provider) = (userId, activeProvider)
+//   3. Require validation_status = 'valid'
+//   4. Decrypt api_key_enc
+//   5. Pass { apiKey, model } to provider.complete()
 
 import 'server-only'
 
-import { supabaseAdmin } from '@/lib/supabase/admin'
-import { decryptKey } from '@/lib/ai/key'
-import { getProvider } from '@/lib/ai/providers/resolver'
+import { getDecryptedKey } from '@/lib/ai/key'
+import { getProvider, getActiveProviderName } from '@/lib/ai/providers/resolver'
 import { createLocalBlock } from '@/lib/outline'
 import { matchObservancesToWeeks, formatObservancesForPrompt } from '@/lib/liturgical'
 
@@ -41,7 +44,7 @@ import * as TagsPrompt     from '@/lib/ai/prompts/tags'
 
 import type { OutlineBlock, ResearchCategory, ProposedWeek } from '@/types/database'
 
-// ── Re-export types so callers only need one import ──────────────────────────
+// ── Re-export types so callers only need one import ───────────────────────────
 export type {
   OutlineInput, OutlineResult,
   ResearchInput, ResearchResult, ResearchItemPayload,
@@ -52,30 +55,30 @@ export { AIError } from '@/lib/ai/types'
 export type { AIErrorCode } from '@/lib/ai/types'
 
 // ── Credential resolution ─────────────────────────────────────────────────────
-// Shared by all service functions. Throws AIError, never returns null.
+// Single function. Reads from user_ai_credentials via key.ts.
+// Throws AIError on any failure — callers do not need to handle nulls.
 
 async function resolveCredentials(userId: string): Promise<ProviderCredentials> {
-  const { data } = await supabaseAdmin
-    .from('user_ai_keys')
-    .select('openai_key_enc, model_preference, validation_status')
-    .eq('user_id', userId)
-    .single()
+  const provider = getActiveProviderName()
+  const creds = await getDecryptedKey(userId, provider)
 
-  if (!data || !data.openai_key_enc) {
-    throw new AIError('key_missing', 'No AI key found. Add one in Settings → AI.')
-  }
-  if (data.validation_status !== 'valid') {
+  if (!creds) {
+    // Distinguish missing key vs invalid key for better error messages
+    const { data } = await import('@/lib/supabase/admin').then(m =>
+      m.supabaseAdmin
+        .from('user_ai_credentials')
+        .select('validation_status')
+        .eq('user_id', userId)
+        .eq('provider', provider)
+        .single()
+    )
+    if (!data) {
+      throw new AIError('key_missing', 'No AI key found. Add one in Settings → AI.')
+    }
     throw new AIError('key_invalid', 'AI key is not validated. Check Settings → AI.')
   }
 
-  let apiKey: string
-  try {
-    apiKey = await decryptKey(data.openai_key_enc)
-  } catch {
-    throw new AIError('key_invalid', 'Failed to decrypt AI key. Re-save your key in Settings → AI.')
-  }
-
-  return { apiKey, model: data.model_preference ?? 'gpt-4o' }
+  return creds
 }
 
 // ── Logging helper ────────────────────────────────────────────────────────────
@@ -96,7 +99,6 @@ export async function generateOutline(
 
   const completion = await provider.complete(prompt, creds)
 
-  // Map raw parsed JSON to OutlineBlock[]
   type RawBlock = { type?: string; content?: string; parent_index?: number | null; estimated_minutes?: number | null; confidence?: 'high' | 'medium' | 'low' }
   const raw = completion.parsed as RawBlock[]
 
@@ -142,7 +144,6 @@ export async function generateResearch(
   userId: string,
   input: ResearchInput
 ): Promise<ResearchResult> {
-  // Guard stubbed categories before making any API call
   if (input.category === 'denominational' || input.category === 'current_topic') {
     throw new AIError('generation_failed', `Research category "${input.category}" is not yet available.`)
   }
@@ -156,9 +157,9 @@ export async function generateResearch(
   type RawItem = {
     title?: string
     content?: string
-    subcategory?: string
+    subcategory?: string | null
     confidence?: 'high' | 'medium' | 'low'
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown> | null
   }
   const raw = completion.parsed as RawItem[]
 
@@ -195,8 +196,6 @@ export async function generateResearch(
   return result
 }
 
-// Theological items get a tradition-specific source label.
-// Uses the same RawItem shape as generateResearch.
 function buildSourceLabel(
   input: ResearchInput,
   item: { subcategory?: string | null; metadata?: Record<string, unknown> | null },
@@ -220,7 +219,6 @@ export async function generateSeries(
   const creds = await resolveCredentials(userId)
   const provider = getProvider()
 
-  // Build liturgical context if not pre-computed by caller
   const liturgicalContext = input.liturgicalContext ?? buildLiturgicalContext(
     input.startDate,
     input.totalWeeks,
@@ -274,7 +272,6 @@ export async function suggestTags(
 
   const raw = completion.parsed
 
-  // Accept either string[] or array of { label } objects
   let suggestions: string[]
   if (Array.isArray(raw)) {
     suggestions = raw

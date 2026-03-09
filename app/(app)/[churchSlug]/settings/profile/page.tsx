@@ -1,4 +1,5 @@
-import { requireUser } from '@/lib/auth'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { ProfileForm } from '@/components/settings/ProfileForm'
 import Link from 'next/link'
@@ -8,7 +9,10 @@ interface Props { params: { churchSlug: string } }
 
 export default async function ProfilePage({ params }: Props) {
   const { churchSlug } = params
-  const user = await requireUser()
+  const supabase = await createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const { data: profile } = await supabaseAdmin
     .from('profiles')

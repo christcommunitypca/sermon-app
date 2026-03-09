@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
@@ -10,8 +10,9 @@ interface Props { params: { churchSlug: string } }
 export default async function NewFlowPage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
   if (!church) return notFound()

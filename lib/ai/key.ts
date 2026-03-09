@@ -1,11 +1,32 @@
+// ── lib/ai/key.ts ─────────────────────────────────────────────────────────────
+// Credential management for the AI layer.
+//
+// TABLE: user_ai_credentials (user_id, provider) PRIMARY KEY
+// One row per user per provider. Adding a new provider = zero schema changes.
+//
+// RUNTIME RESOLUTION ORDER (for every AI call):
+//   1. AI_PROVIDER env var → selects active provider (default: 'openai')
+//   2. Look up user_ai_credentials WHERE (user_id, provider) = (userId, activeProvider)
+//   3. Require validation_status = 'valid'
+//   4. Decrypt api_key_enc → plain API key
+//   5. Pass to provider.complete()
+//
+// There is no env-based key fallback. All keys are user-stored.
+// This keeps per-user credentials clean — each teacher owns their own key.
+//
+// MOCK VALIDATION:
+//   Set AI_MOCK_VALIDATION=true to skip real API validation calls.
+//   This replaces the old per-provider OPENAI_MOCK_VALIDATION / ANTHROPIC_MOCK_VALIDATION.
+//   Useful for local dev without real API keys.
+
 import 'server-only'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { ValidationStatus } from '@/types/database'
+import type { SupportedProvider } from '@/lib/ai/providers/resolver'
 
 // ── Encryption ────────────────────────────────────────────────────────────────
 // AES-256-GCM. Key derived from ENCRYPTION_SECRET env var via PBKDF2.
-// The encrypted value is stored as base64(iv + authTag + ciphertext).
-// The raw key is never returned to the client after being saved.
+// Stored as base64(iv[12] + ciphertext). Raw key never returned to client.
 
 const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET
 if (!ENCRYPTION_SECRET && process.env.NODE_ENV === 'production') {
@@ -16,18 +37,13 @@ async function getDerivedKey(): Promise<CryptoKey> {
   const encoder = new TextEncoder()
   const secret = ENCRYPTION_SECRET ?? 'dev-secret-do-not-use-in-production'
   const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveKey']
+    'raw', encoder.encode(secret), { name: 'PBKDF2' }, false, ['deriveKey']
   )
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', salt: encoder.encode('church-platform-v1'), iterations: 100_000, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
+    false, ['encrypt', 'decrypt']
   )
 }
 
@@ -37,7 +53,6 @@ export async function encryptKey(plaintext: string): Promise<string> {
   const encoded = new TextEncoder().encode(plaintext)
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded)
   const cipherBytes = new Uint8Array(encrypted)
-  // Store as: base64(iv[12] + ciphertext)
   const combined = new Uint8Array(iv.length + cipherBytes.length)
   combined.set(iv)
   combined.set(cipherBytes, iv.length)
@@ -53,64 +68,141 @@ export async function decryptKey(stored: string): Promise<string> {
   return new TextDecoder().decode(decrypted)
 }
 
-// ── Validation ────────────────────────────────────────────────────────────────
-// Validates an OpenAI API key by calling the models list endpoint.
-// If OPENAI_MOCK_VALIDATION=true, skips the real call (for local dev without a real key).
+// ── Provider validation ───────────────────────────────────────────────────────
+// Each provider validates differently. All return the same ValidationResult shape.
+// A single AI_MOCK_VALIDATION=true env var skips all real calls for local dev.
 
 interface ValidationResult {
   status: 'valid' | 'invalid' | 'expired'
   error: string | null
 }
 
-export async function validateOpenAIKey(encryptedKey: string): Promise<ValidationResult> {
-  if (process.env.OPENAI_MOCK_VALIDATION === 'true') {
-    // Stub for local dev. Swap OPENAI_MOCK_VALIDATION=false when using real keys.
-    console.warn('[ai-key] Mock validation active — always returns valid')
+function isMockValidation(): boolean {
+  return process.env.AI_MOCK_VALIDATION === 'true'
+}
+
+async function validatePlainKey(
+  plainKey: string,
+  provider: SupportedProvider
+): Promise<ValidationResult> {
+  if (isMockValidation()) {
+    console.warn(`[ai-key] Mock validation active (AI_MOCK_VALIDATION=true) — skipping real ${provider} call`)
     return { status: 'valid', error: null }
   }
 
-  let plainKey: string
-  try {
-    plainKey = await decryptKey(encryptedKey)
-  } catch {
-    return { status: 'invalid', error: 'Failed to decrypt key for validation' }
+  switch (provider) {
+    case 'openai':    return validateOpenAIPlainKey(plainKey)
+    case 'anthropic': return validateAnthropicPlainKey(plainKey)
+    default:
+      return { status: 'invalid', error: `No validator implemented for provider: ${provider}` }
   }
+}
 
+async function validateOpenAIPlainKey(plainKey: string): Promise<ValidationResult> {
   try {
     const res = await fetch('https://api.openai.com/v1/models', {
       headers: { Authorization: `Bearer ${plainKey}` },
     })
-
-    if (res.ok) {
-      return { status: 'valid', error: null }
-    }
-
-    const body = await res.json().catch(() => ({}))
+    if (res.ok) return { status: 'valid', error: null }
+    const body = await res.json().catch(() => ({})) as { error?: { message?: string } }
     const message = body?.error?.message ?? `HTTP ${res.status}`
-
-    if (res.status === 401) {
-      return { status: 'invalid', error: `Invalid API key: ${message}` }
-    }
-    if (res.status === 429) {
-      // Rate limited but key is valid
-      return { status: 'valid', error: null }
-    }
-
+    if (res.status === 401) return { status: 'invalid', error: `Invalid API key: ${message}` }
+    if (res.status === 429) return { status: 'valid', error: null }
     return { status: 'invalid', error: message }
   } catch (err) {
     return { status: 'invalid', error: err instanceof Error ? err.message : 'Network error' }
   }
 }
 
-// ── saveAndValidateKey ────────────────────────────────────────────────────────
-// Full flow: encrypt → store as untested → validate → update status.
-// Returns the final validation status.
+async function validateAnthropicPlainKey(plainKey: string): Promise<ValidationResult> {
+  try {
+    // Anthropic has no models-list endpoint. Validate via a minimal 1-token completion.
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': plainKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    })
+    if (res.ok) return { status: 'valid', error: null }
+    const body = await res.json().catch(() => ({})) as { error?: { message?: string } }
+    const message = body?.error?.message ?? `HTTP ${res.status}`
+    if (res.status === 401) return { status: 'invalid', error: `Invalid API key: ${message}` }
+    if (res.status === 429) return { status: 'valid', error: null }
+    return { status: 'invalid', error: message }
+  } catch (err) {
+    return { status: 'invalid', error: err instanceof Error ? err.message : 'Network error' }
+  }
+}
+
+// ── Default models per provider ───────────────────────────────────────────────
+
+export const PROVIDER_DEFAULT_MODEL: Record<SupportedProvider, string> = {
+  openai:    'gpt-4o',
+  anthropic: 'claude-sonnet-4-6',
+}
+
+// ── Database helpers ──────────────────────────────────────────────────────────
+// All credential DB access goes through these. No other file queries
+// user_ai_credentials for key material.
+
+type CredentialRow = {
+  api_key_enc: string | null
+  model_preference: string | null
+  validation_status: string
+  validated_at: string | null
+  validation_error: string | null
+  updated_at: string
+}
+
+async function getCredentialRow(
+  userId: string,
+  provider: SupportedProvider
+): Promise<CredentialRow | null> {
+  const { data } = await supabaseAdmin
+    .from('user_ai_credentials')
+    .select('api_key_enc, model_preference, validation_status, validated_at, validation_error, updated_at')
+    .eq('user_id', userId)
+    .eq('provider', provider)
+    .single()
+  return data ?? null
+}
+
+async function upsertCredentialStatus(
+  userId: string,
+  provider: SupportedProvider,
+  status: 'valid' | 'invalid' | 'expired' | 'untested',
+  error: string | null
+): Promise<void> {
+  await supabaseAdmin
+    .from('user_ai_credentials')
+    .update({
+      validation_status: status,
+      validated_at: status === 'valid' ? new Date().toISOString() : null,
+      validation_error: error,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .eq('provider', provider)
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+// saveAndValidateKey
+// Full flow: encrypt → upsert as untested → validate → update status.
+// Upsert is keyed on (user_id, provider) — safe to call repeatedly.
 export async function saveAndValidateKey(
   userId: string,
   plainKey: string,
-  modelPreference: string
+  modelPreference: string,
+  provider: SupportedProvider
 ): Promise<{ status: ValidationStatus; error: string | null }> {
-  // 1. Encrypt
   let encrypted: string
   try {
     encrypted = await encryptKey(plainKey)
@@ -118,91 +210,106 @@ export async function saveAndValidateKey(
     return { status: 'invalid', error: 'Encryption failed' }
   }
 
-  // 2. Upsert as untested
   const { error: upsertError } = await supabaseAdmin
-    .from('user_ai_keys')
+    .from('user_ai_credentials')
     .upsert({
       user_id: userId,
-      openai_key_enc: encrypted,
+      provider,
+      api_key_enc: encrypted,
       model_preference: modelPreference,
       validation_status: 'untested',
       validated_at: null,
       validation_error: null,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' })
+    }, { onConflict: 'user_id,provider' })
 
   if (upsertError) {
     return { status: 'untested', error: 'Failed to save key' }
   }
 
-  // 3. Validate immediately
-  const result = await validateOpenAIKey(encrypted)
-
-  // 4. Update validation status
-  await supabaseAdmin
-    .from('user_ai_keys')
-    .update({
-      validation_status: result.status,
-      validated_at: result.status === 'valid' ? new Date().toISOString() : null,
-      validation_error: result.error,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId)
-
+  const result = await validatePlainKey(plainKey, provider)
+  await upsertCredentialStatus(userId, provider, result.status, result.error)
   return result
 }
 
-// ── validateExistingKey ───────────────────────────────────────────────────────
-// Re-validate the stored (encrypted) key on demand.
+// validateExistingKey
+// Re-validates the stored encrypted key on demand.
 export async function validateExistingKey(
-  userId: string
+  userId: string,
+  provider: SupportedProvider
 ): Promise<{ status: ValidationStatus; error: string | null }> {
-  const { data, error } = await supabaseAdmin
-    .from('user_ai_keys')
-    .select('openai_key_enc')
-    .eq('user_id', userId)
-    .single()
+  const row = await getCredentialRow(userId, provider)
 
-  if (error || !data?.openai_key_enc) {
+  if (!row?.api_key_enc) {
     return { status: 'invalid', error: 'No API key found' }
   }
 
-  const result = await validateOpenAIKey(data.openai_key_enc)
+  let plainKey: string
+  try {
+    plainKey = await decryptKey(row.api_key_enc)
+  } catch {
+    return { status: 'invalid', error: 'Failed to decrypt stored key' }
+  }
 
-  await supabaseAdmin
-    .from('user_ai_keys')
-    .update({
-      validation_status: result.status,
-      validated_at: result.status === 'valid' ? new Date().toISOString() : null,
-      validation_error: result.error,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId)
-
+  const result = await validatePlainKey(plainKey, provider)
+  await upsertCredentialStatus(userId, provider, result.status, result.error)
   return result
 }
 
-// ── getKeyStatus ──────────────────────────────────────────────────────────────
-// Returns the non-sensitive status row for display in settings UI.
-// Never returns the encrypted key.
-export async function getKeyStatus(userId: string) {
+// getKeyStatus
+// Returns the non-sensitive status row for the active provider.
+// Never returns api_key_enc.
+export async function getKeyStatus(userId: string, provider: SupportedProvider) {
   const { data } = await supabaseAdmin
-    .from('user_ai_keys')
+    .from('user_ai_credentials')
     .select('validation_status, validated_at, validation_error, model_preference, updated_at')
     .eq('user_id', userId)
+    .eq('provider', provider)
     .single()
-
   return data ?? null
 }
 
-// ── hasValidKey ───────────────────────────────────────────────────────────────
-// Quick check for gating AI features.
-export async function hasValidKey(userId: string): Promise<boolean> {
+// hasValidKey
+// Returns true if the user has a valid key for the given provider.
+// Used for feature gating in page components.
+export async function hasValidKey(userId: string, provider: SupportedProvider): Promise<boolean> {
   const { data } = await supabaseAdmin
-    .from('user_ai_keys')
+    .from('user_ai_credentials')
     .select('validation_status')
     .eq('user_id', userId)
+    .eq('provider', provider)
     .single()
-
   return data?.validation_status === 'valid'
+}
+
+// getDecryptedKey
+// Returns the decrypted API key for the active provider.
+// Called only by service.ts — never exposed to client code.
+export async function getDecryptedKey(
+  userId: string,
+  provider: SupportedProvider
+): Promise<{ apiKey: string; model: string } | null> {
+  const row = await getCredentialRow(userId, provider)
+  if (!row?.api_key_enc || row.validation_status !== 'valid') return null
+
+  try {
+    const apiKey = await decryptKey(row.api_key_enc)
+    const model = pickModel(row.model_preference, provider)
+    return { apiKey, model }
+  } catch {
+    return null
+  }
+}
+
+// pickModel
+// Returns the model to use: stored preference if it matches the provider,
+// otherwise the provider default.
+function pickModel(stored: string | null, provider: SupportedProvider): string {
+  if (!stored) return PROVIDER_DEFAULT_MODEL[provider]
+  const providerPrefixes: Record<SupportedProvider, string[]> = {
+    openai:    ['gpt-', 'o1', 'o3'],
+    anthropic: ['claude-'],
+  }
+  const prefixes = providerPrefixes[provider] ?? []
+  return prefixes.some(p => stored.startsWith(p)) ? stored : PROVIDER_DEFAULT_MODEL[provider]
 }

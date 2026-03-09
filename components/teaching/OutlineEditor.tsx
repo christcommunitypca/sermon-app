@@ -1,5 +1,7 @@
 'use client'
 
+import { generateOutlineAction } from '@/app/actions/ai'
+
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
@@ -164,19 +166,17 @@ export function OutlineEditor({
     setAILoading(true)
     setAIError(null)
 
-    const res = await fetch('/api/ai/generate-outline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, churchId, flowStructure }),
-    })
-
-    const data = await res.json()
-    setAILoading(false)
-
-    if (!res.ok || data.error) {
-      setAIError(data.error ?? 'Generation failed')
-    } else {
-      setAIProposed(data.blocks)
+    try {
+      const data = await generateOutlineAction({ sessionId, churchId, flowStructure })
+      if (data.error || !data.blocks) {
+        setAIError(data.error ?? 'Generation failed')
+      } else {
+        setAIProposed(data.blocks)
+      }
+    } catch (err) {
+      setAIError(err instanceof Error ? err.message : 'Generation failed')
+    } finally {
+      setAILoading(false)
     }
   }
 

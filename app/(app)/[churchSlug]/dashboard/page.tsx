@@ -1,7 +1,9 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { hasValidKey } from '@/lib/ai/key'
+import { getActiveProviderName } from '@/lib/ai/providers/resolver'
 import { Plus, BookOpen, Clock, ArrowRight, Sparkles } from 'lucide-react'
 
 interface Props { params: { churchSlug: string } }
@@ -9,8 +11,9 @@ interface Props { params: { churchSlug: string } }
 export default async function DashboardPage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const { data: church } = await supabaseAdmin.from('churches').select('id, name').eq('slug', churchSlug).single()
   if (!church) return notFound()
@@ -26,10 +29,7 @@ export default async function DashboardPage({ params }: Props) {
     .order('updated_at', { ascending: false })
     .limit(5)
 
-  const { data: aiKey } = await supabaseAdmin
-    .from('user_ai_keys').select('validation_status').eq('user_id', user.id).single()
-  const hasAIKey = aiKey?.validation_status === 'valid'
-
+  const hasAIKey = await hasValidKey(user.id, getActiveProviderName())
   const firstName = profile?.full_name?.split(' ')[0] ?? 'Pastor'
 
   return (

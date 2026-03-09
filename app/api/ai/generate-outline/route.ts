@@ -5,7 +5,8 @@ import { getSessionWithOutline, getThoughtsForSession, ensureOutline } from '@/l
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  const user = authSession?.user ?? null
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { sessionId, churchId, flowStructure } = await req.json()

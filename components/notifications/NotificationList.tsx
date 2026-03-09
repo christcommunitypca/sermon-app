@@ -1,5 +1,7 @@
 'use client'
 
+import { markAllNotificationsReadAction } from '@/app/actions/auth'
+
 import { useState } from 'react'
 import { Notification } from '@/types/database'
 import { Bell } from 'lucide-react'
@@ -21,7 +23,7 @@ export function NotificationList({ notifications: initial, emailEnabled: initEma
 
   async function markAllRead() {
     setMarkingAll(true)
-    await fetch('/api/notifications/read-all', { method: 'POST' })
+    await markAllNotificationsReadAction(userId)
     setNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })))
     setMarkingAll(false)
   }
@@ -38,11 +40,7 @@ export function NotificationList({ notifications: initial, emailEnabled: initEma
   async function toggleEmail() {
     const next = !emailEnabled
     setEmailEnabled(next)
-    await fetch('/api/notifications/preferences', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ churchId, userId, emailEnabled: next }),
-    })
+    // TODO: preferences server action
   }
 
   return (

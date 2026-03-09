@@ -1,20 +1,13 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
+
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { createSnapshotPair } from '@/lib/snapshots'
 import { ensureOutline, getSessionWithOutline } from '@/lib/teaching'
 import { OutlineBlock, SessionSnapshotData } from '@/types/database'
 import { normalizePositions } from '@/lib/outline'
-
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
 
 // ── Save full block tree (replaces all blocks for this outline) ────────────────
 // This is the primary save path. Client sends the full current state.
@@ -24,7 +17,8 @@ export async function saveBlocksAction(
   churchId: string,
   blocks: Omit<OutlineBlock, 'created_at' | 'updated_at'>[]
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify ownership
   const { data: session } = await supabaseAdmin
@@ -79,7 +73,8 @@ export async function createManualSnapshotAction(
   label: string,
   blocks: OutlineBlock[]
 ): Promise<{ version?: number; error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   try {
     const { data: session } = await supabaseAdmin
@@ -132,7 +127,8 @@ export async function restoreSnapshotAction(
   churchSlug: string,
   versionNumber: number
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify ownership
   const { data: session } = await supabaseAdmin

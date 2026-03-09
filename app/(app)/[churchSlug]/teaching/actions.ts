@@ -1,23 +1,17 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { writeAuditLog, AUDIT_ACTIONS } from '@/lib/audit'
 import { ensureOutline } from '@/lib/teaching'
 import { SessionType, SessionStatus, Visibility } from '@/types/database'
 
-async function getAuthContext() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
-
 // ── Create session ─────────────────────────────────────────────────────────────
 export async function createSessionAction(formData: FormData) {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return redirect('/sign-in')
 
   const churchId = formData.get('churchId') as string
   const churchSlug = formData.get('churchSlug') as string
@@ -61,7 +55,8 @@ export async function createSessionAction(formData: FormData) {
 
 // ── Update session ─────────────────────────────────────────────────────────────
 export async function updateSessionAction(formData: FormData) {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return redirect('/sign-in')
 
   const sessionId = formData.get('sessionId') as string
   const churchSlug = formData.get('churchSlug') as string
@@ -96,7 +91,8 @@ export async function updateSessionStatusAction(
   churchSlug: string,
   newStatus: SessionStatus
 ) {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return redirect('/sign-in')
 
   const statusUpdates: Record<string, unknown> = {
     status: newStatus,
@@ -134,7 +130,8 @@ export async function archiveSessionAction(
   churchId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('teaching_sessions')
@@ -163,7 +160,8 @@ export async function unarchiveSessionAction(
   sessionId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('teaching_sessions')
@@ -187,7 +185,8 @@ export async function deleteSessionAction(
   churchId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthContext()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify session is archived before allowing deletion
   const { data: session } = await supabaseAdmin
@@ -220,4 +219,3 @@ export async function deleteSessionAction(
 
   redirect(`/${churchSlug}/teaching`)
 }
-

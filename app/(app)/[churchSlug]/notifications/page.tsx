@@ -1,4 +1,5 @@
-import { requireUser } from '@/lib/auth'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NotificationList } from '@/components/notifications/NotificationList'
 import type { Metadata } from 'next'
@@ -6,7 +7,10 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = { title: 'Notifications' }
 
 export default async function NotificationsPage({ params }: { params: { churchSlug: string } }) {
-  const user = await requireUser()
+  const supabase = await createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const { data: church } = await supabaseAdmin
     .from('churches').select('id').eq('slug', params.churchSlug).single()

@@ -1,20 +1,14 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { FlowBlock, SessionType } from '@/types/database'
 
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
-
 export async function createFlowAction(formData: FormData) {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return redirect('/sign-in')
 
   const churchId = formData.get('churchId') as string
   const churchSlug = formData.get('churchSlug') as string
@@ -53,7 +47,8 @@ export async function updateFlowAction(
     is_default_for?: SessionType | null
   }
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('flows')
@@ -72,7 +67,8 @@ export async function archiveFlowAction(
   flowId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('flows')
@@ -89,7 +85,8 @@ export async function unarchiveFlowAction(
   flowId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('flows')
@@ -103,7 +100,8 @@ export async function unarchiveFlowAction(
 }
 
 export async function deleteFlowAction(flowId: string, churchId: string, churchSlug: string) {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify flow is archived before allowing deletion
   const { data: flow } = await supabaseAdmin

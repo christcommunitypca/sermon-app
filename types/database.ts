@@ -58,8 +58,27 @@ export interface Profile {
   updated_at: string
 }
 
+// ── User AI Credentials ───────────────────────────────────────────────────────
+// One row per (user_id, provider). Table: user_ai_credentials.
+// Replaces the old user_ai_keys table (single-row-per-user with provider-specific columns).
+// Never contains the raw API key — api_key_enc is the AES-256-GCM encrypted form.
+export interface UserAICredential {
+  user_id: string
+  provider: SupportedAIProvider
+  api_key_enc: string | null
+  model_preference: string | null
+  validation_status: ValidationStatus
+  validated_at: string | null
+  validation_error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type SupportedAIProvider = 'openai' | 'anthropic' | 'google'
+
+// Kept for reference during migration — remove after migration 008 is applied.
+// @deprecated Use UserAICredential instead.
 export interface UserAIKey {
-  id: string
   user_id: string
   openai_key_enc: string | null
   model_preference: string

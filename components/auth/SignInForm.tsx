@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { signInAction } from '@/app/(auth)/sign-in/actions'
 
 const ERROR_MESSAGES: Record<string, string> = {
   not_a_member: 'Your account is not associated with this church. Contact your administrator.',
@@ -14,9 +15,6 @@ interface Props {
 }
 
 export function SignInForm({ returnTo, error }: Props) {
-  const supabase = createClient()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -24,26 +22,15 @@ export function SignInForm({ returnTo, error }: Props) {
   const defaultDest = returnTo ?? (churchSlug ? `/${churchSlug}/dashboard` : '/')
   const displayError = error ? (ERROR_MESSAGES[error] ?? decodeURIComponent(error)) : formError
 
-  async function handleEmailSignIn(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    setFormError(null)
-
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (authError) {
-      setFormError(authError.message)
-      setLoading(false)
-      return
-    }
-
-    // Full page navigation so the browser sends the newly written auth cookie
-    // to the server on the next request. router.push() does not guarantee this.
-    window.location.href = defaultDest
-  }
+  // Email/password sign-in uses a server action so the session cookie is written
+  // server-side (httpOnly) from the first request. Signing in via the browser
+  // Supabase client writes a non-httpOnly cookie that can conflict with the
+  // server-managed cookie that middleware writes, causing getSession() to return
+  // null on subsequent navigations.
 
   async function handleGoogleSignIn() {
     setLoading(true)
+    const supabase = createClient()
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -66,12 +53,13 @@ export function SignInForm({ returnTo, error }: Props) {
         </div>
       )}
 
-      <form onSubmit={handleEmailSignIn} className="space-y-4">
+      <form action={signInAction} className="space-y-4">
+        <input type="hidden" name="returnTo" value={defaultDest} />
+
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">Email</label>
           <input
-            id="email" type="email" autoComplete="email" required
-            value={email} onChange={e => setEmail(e.target.value)}
+            id="email" name="email" type="email" autoComplete="email" required
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             placeholder="you@church.com"
           />
@@ -80,8 +68,7 @@ export function SignInForm({ returnTo, error }: Props) {
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">Password</label>
           <input
-            id="password" type="password" autoComplete="current-password" required
-            value={password} onChange={e => setPassword(e.target.value)}
+            id="password" name="password" type="password" autoComplete="current-password" required
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
           />
         </div>

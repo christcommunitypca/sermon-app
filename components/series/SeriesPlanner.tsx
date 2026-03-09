@@ -41,7 +41,7 @@ export function SeriesPlanner({ churchId, churchSlug, formData, initialWeeks, ob
     setSaving(true)
     setError(null)
     try {
-      await createSeriesAction(churchId, churchSlug, {
+      const result = await createSeriesAction(churchId, churchSlug, {
         title: formData.title,
         description: formData.description || null,
         scriptureSection: formData.scriptureSection,
@@ -49,6 +49,11 @@ export function SeriesPlanner({ churchId, churchSlug, formData, initialWeeks, ob
         startDate: formData.startDate || null,
         weeks,
       })
+      if (result?.error) {
+        setError(result.error)
+        setSaving(false)
+      }
+      // On success, createSeriesAction calls redirect() which navigates the page
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save series')
       setSaving(false)

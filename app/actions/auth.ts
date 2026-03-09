@@ -5,11 +5,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { CookieOptions } from '@supabase/ssr'
 
-export async function signInAction(formData: FormData) {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-  const returnTo = formData.get('returnTo') as string | null
-
+export async function signOutAction() {
   const cookieStore = await cookies()
 
   const supabase = createServerClient(
@@ -27,14 +23,17 @@ export async function signInAction(formData: FormData) {
     }
   )
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  await supabase.auth.signOut()
+  redirect('/sign-in')
+}
 
-  if (error) {
-    const params = new URLSearchParams({ error: error.message })
-    if (returnTo) params.set('returnTo', returnTo)
-    redirect(`/sign-in?${params.toString()}`)
-  }
+// ── Notification actions ────────────────────────────────────────────────────
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
-  const dest = returnTo?.startsWith('/') ? returnTo : `/${process.env.NEXT_PUBLIC_CHURCH_SLUG}/dashboard`
-  redirect(dest)
+export async function markAllNotificationsReadAction(userId: string) {
+  await supabaseAdmin
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .is('read_at', null)
 }

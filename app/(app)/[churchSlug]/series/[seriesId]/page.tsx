@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getSeriesWithSessions } from '@/lib/series'
@@ -11,8 +11,9 @@ interface Props { params: { churchSlug: string; seriesId: string } }
 export default async function SeriesDetailPage({ params }: Props) {
   const { churchSlug, seriesId } = params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const data = await getSeriesWithSessions(seriesId, user.id)
   if (!data) return notFound()

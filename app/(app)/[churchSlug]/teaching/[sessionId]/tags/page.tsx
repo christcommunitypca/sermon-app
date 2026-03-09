@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
@@ -11,8 +11,9 @@ interface Props { params: { churchSlug: string; sessionId: string } }
 export default async function TagsPage({ params }: Props) {
   const { churchSlug, sessionId } = params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
   if (!church) return notFound()

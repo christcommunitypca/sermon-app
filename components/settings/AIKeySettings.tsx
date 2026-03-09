@@ -1,5 +1,7 @@
 'use client'
 
+import { saveAIKeyAction, validateAIKeyAction, removeAIKeyAction } from '@/app/actions/ai-key'
+
 import { useState } from 'react'
 import { CheckCircle2, XCircle, Clock, AlertCircle, Eye, EyeOff, Trash2 } from 'lucide-react'
 
@@ -13,70 +15,106 @@ type KeyStatusData = {
   updated_at: string
 } | null
 
+export type SupportedProvider = 'openai' | 'anthropic'
+
 interface Props {
   initialStatus: KeyStatusData
   userId: string
+  activeProvider: SupportedProvider
 }
 
-const MODEL_OPTIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o (recommended)' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini (faster, lower cost)' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-]
+// ── Provider metadata ─────────────────────────────────────────────────────────
 
-export function AIKeySettings({ initialStatus, userId }: Props) {
+const PROVIDER_CONFIG: Record<SupportedProvider, {
+  label: string
+  keyPrefix: string
+  placeholder: string
+  docsUrl: string
+  docsLabel: string
+  models: { value: string; label: string }[]
+}> = {
+  openai: {
+    label: 'OpenAI',
+    keyPrefix: 'sk-',
+    placeholder: 'sk-proj-...',
+    docsUrl: 'https://platform.openai.com/api-keys',
+    docsLabel: 'platform.openai.com/api-keys',
+    models: [
+      { value: 'gpt-4o',       label: 'GPT-4o (recommended)' },
+      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini (faster, lower cost)' },
+      { value: 'gpt-4-turbo',  label: 'GPT-4 Turbo' },
+    ],
+  },
+  anthropic: {
+    label: 'Anthropic',
+    keyPrefix: 'sk-ant-',
+    placeholder: 'sk-ant-api03-...',
+    docsUrl: 'https://console.anthropic.com/settings/keys',
+    docsLabel: 'console.anthropic.com/settings/keys',
+    models: [
+      { value: 'claude-sonnet-4-6',       label: 'Claude Sonnet 4.6 (recommended)' },
+      { value: 'claude-opus-4-6',         label: 'Claude Opus 4.6 (most capable)' },
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (fastest, lowest cost)' },
+    ],
+  },
+}
+
+export function AIKeySettings({ initialStatus, userId, activeProvider }: Props) {
+  const config = PROVIDER_CONFIG[activeProvider]
+  const defaultModel = config.models[0].value
+
   const [status, setStatus] = useState<KeyStatusData>(initialStatus)
   const [keyInput, setKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
-  const [modelPref, setModelPref] = useState(initialStatus?.model_preference ?? 'gpt-4o')
+  const [modelPref, setModelPref] = useState(
+    // If stored model_preference matches a model for this provider, use it; otherwise default
+    config.models.some(m => m.value === initialStatus?.model_preference)
+      ? (initialStatus?.model_preference ?? defaultModel)
+      : defaultModel
+  )
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const currentStatus: StatusType = status
-    ? status.validation_status
-    : 'not_set'
+  const currentStatus: StatusType = status ? status.validation_status : 'not_set'
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSave() {
     if (!keyInput.trim()) return
     setSaving(true)
     setError(null)
 
-    const res = await fetch('/api/settings/ai-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: keyInput.trim(), modelPreference: modelPref }),
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? 'Failed to save key')
-    } else {
-      setStatus(data.status)
-      setKeyInput('')
+    try {
+      const data = await saveAIKeyAction({ key: keyInput.trim(), modelPreference: modelPref })
+      if (data.error) {
+        setError(data.error)
+      } else {
+        setStatus(data.status)
+        setKeyInput('')
+      }
+    } catch {
+      setError('Failed to save key')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   async function handleValidate() {
     setValidating(true)
     setError(null)
-    const res = await fetch('/api/settings/ai-key/validate', { method: 'POST' })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? 'Validation failed')
+    const data = await validateAIKeyAction()
+    if (data.error) {
+      setError(data.error)
     } else {
-      setStatus(prev => prev ? { ...prev, ...data.status } : null)
+      setStatus(prev => prev ? { ...prev, ...data.status } : prev)
     }
     setValidating(false)
   }
 
   async function handleRemove() {
     setRemoving(true)
-    await fetch('/api/settings/ai-key', { method: 'DELETE' })
+    await removeAIKeyAction()
     setStatus(null)
     setConfirmRemove(false)
     setRemoving(false)
@@ -100,7 +138,11 @@ export function AIKeySettings({ initialStatus, userId }: Props) {
         </div>
 
         <div className="mt-3">
-          <StatusDisplay status={currentStatus} validatedAt={status?.validated_at ?? null} error={status?.validation_error ?? null} />
+          <StatusDisplay
+            status={currentStatus}
+            validatedAt={status?.validated_at ?? null}
+            error={status?.validation_error ?? null}
+          />
         </div>
 
         {currentStatus === 'untested' && (
@@ -119,13 +161,13 @@ export function AIKeySettings({ initialStatus, userId }: Props) {
       {/* Save / update key form */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <h2 className="text-sm font-medium text-slate-700 mb-4">
-          {currentStatus === 'not_set' ? 'Add API Key' : 'Update API Key'}
+          {currentStatus === 'not_set' ? `Add ${config.label} API Key` : `Update ${config.label} API Key`}
         </h2>
 
-        <form onSubmit={handleSave} className="space-y-4">
+        <form className="space-y-4">
           <div>
             <label htmlFor="api-key" className="block text-xs font-medium text-slate-600 mb-1.5">
-              OpenAI API Key
+              {config.label} API Key
             </label>
             <div className="relative">
               <input
@@ -133,7 +175,7 @@ export function AIKeySettings({ initialStatus, userId }: Props) {
                 type={showKey ? 'text' : 'password'}
                 value={keyInput}
                 onChange={e => setKeyInput(e.target.value)}
-                placeholder="sk-proj-..."
+                placeholder={config.placeholder}
                 className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400"
               />
               <button
@@ -146,7 +188,11 @@ export function AIKeySettings({ initialStatus, userId }: Props) {
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Get your key at platform.openai.com/api-keys. The key is encrypted before storage.
+              Get your key at{' '}
+              <a href={config.docsUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">
+                {config.docsLabel}
+              </a>
+              . The key is encrypted before storage and never returned to the browser.
             </p>
           </div>
 
@@ -160,18 +206,17 @@ export function AIKeySettings({ initialStatus, userId }: Props) {
               onChange={e => setModelPref(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             >
-              {MODEL_OPTIONS.map(opt => (
+              {config.models.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
 
-          {error && (
-            <p className="text-sm text-red-600">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleSave}
             disabled={!keyInput.trim() || saving}
             className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -256,7 +301,6 @@ function StatusDisplay({
     )
   }
 
-  // invalid or expired
   return (
     <div>
       <div className="flex items-center gap-2 text-sm text-red-600">

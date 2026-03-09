@@ -1,23 +1,41 @@
 // ── lib/ai/providers/resolver.ts ─────────────────────────────────────────────
 // Returns the active AI provider instance.
-// This is the single place to change providers in the future.
+// Provider is selected via AI_PROVIDER environment variable.
 //
-// To add a new provider later:
-// 1. Implement the AIProvider interface in a new provider file
-// 2. Import it here
-// 3. Change the return statement (or add env-based logic)
+// Valid values: "openai" | "anthropic"
+// Default: "openai"
+//
+// To switch providers:
+//   In .env.local: AI_PROVIDER=anthropic
+//   No code changes needed. No callers change.
+//
+// To add a new provider:
+//   1. Implement AIProvider in a new file under providers/
+//   2. Import and instantiate it here
+//   3. Add it to the switch statement
 //
 // No caller outside lib/ai/ should ever import a provider directly.
 
 import type { AIProvider } from '@/lib/ai/types'
 import { OpenAIProvider } from './openai'
+import { AnthropicProvider } from './anthropic'
 
-// ── Active provider ───────────────────────────────────────────────────────────
-// Singleton — instantiated once, reused across requests.
+// ── Singletons — instantiated once, reused across requests ────────────────────
 const openai = new OpenAIProvider()
+const anthropic = new AnthropicProvider()
+
+export type SupportedProvider = 'openai' | 'anthropic'
+
+export function getActiveProviderName(): SupportedProvider {
+  const configured = process.env.AI_PROVIDER?.toLowerCase()
+  if (configured === 'anthropic') return 'anthropic'
+  return 'openai' // default
+}
 
 export function getProvider(): AIProvider {
-  // TODO: When multi-provider support is added, resolve from config or env here.
-  // e.g. process.env.AI_PROVIDER === 'anthropic' ? anthropic : openai
-  return openai
+  const name = getActiveProviderName()
+  switch (name) {
+    case 'anthropic': return anthropic
+    case 'openai':    return openai
+  }
 }

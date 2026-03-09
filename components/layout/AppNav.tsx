@@ -3,8 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { signOutAction } from '@/app/actions/auth'
 import { Role } from '@/types/database'
 import {
   BookOpen, Search, Bell, Settings, Users,
@@ -29,8 +28,6 @@ interface Props {
 
 export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, unreadCount }: Props) {
   const pathname = usePathname()
-  const router = useRouter()
-  const supabase = createClient()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const base = `/${churchSlug}`
@@ -48,8 +45,7 @@ export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, 
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin)
 
   async function handleSignOut() {
-    await supabase.auth.signOut()
-    router.push('/sign-in')
+    await signOutAction()
   }
 
   function isActive(href: string) {

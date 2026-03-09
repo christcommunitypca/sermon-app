@@ -1,21 +1,20 @@
-import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Middleware responsibility: session cookie refresh ONLY.
-// Auth gating and church membership checks are handled in:
-//   app/(app)/[churchSlug]/layout.tsx  — for app routes
-//   lib/auth.ts requireUser()          — for API routes
+// Middleware runs on every request and does two things:
+// 1. Calls supabase.auth.getUser() to verify the session token against the
+//    Supabase Auth server and refresh it if expiring. This is the ONLY place
+//    in the app that calls getUser() — one network round-trip per request.
+//    The refreshed token is written to the response cookie so all downstream
+//    code (pages, actions, layouts) sees a fresh, valid session.
+// 2. Redirects unauthenticated requests to /sign-in.
 //
-// This follows the Supabase SSR recommended pattern: middleware must not be
-// relied upon for security — it runs on the edge and cannot import server-only
-// modules. The layout server components are the authoritative auth gate.
-// ─────────────────────────────────────────────────────────────────────────────
+// Pages and server actions call getSession() which reads the already-verified
+// cookie written here — no extra network call, no rotation race.
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
-  // Refresh the session cookie on every request so it doesn't expire
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -25,6 +24,7 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+          // Write to both request (for downstream middleware) and response (for browser)
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -35,17 +35,32 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Required: refreshes the session and rotates the cookie if needed.
-  // Must be called on every request — do not remove.
-  await supabase.auth.getUser()
+  // Verify + refresh the session. Must be called before any redirect checks
+  // so the refreshed cookie is available to the page/action that runs next.
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // ── Root redirect ──────────────────────────────────────────────────────────
-  // NEXT_PUBLIC_CHURCH_SLUG is used ONLY here as a convenience redirect for /.
-  // All real auth gating happens in the layout.
-  if (request.nextUrl.pathname === '/') {
-    const slug = process.env.NEXT_PUBLIC_CHURCH_SLUG
+  const { pathname } = request.nextUrl
+  const slug = process.env.NEXT_PUBLIC_CHURCH_SLUG
+
+  // Root redirect
+  if (pathname === '/') {
     const dest = slug ? `/${slug}/dashboard` : '/sign-in'
     return NextResponse.redirect(new URL(dest, request.url))
+  }
+
+  // Protect app routes — redirect unauthenticated users to sign-in
+  const isAppRoute = pathname.startsWith(`/${slug}/`) || pathname === `/${slug}`
+  if (isAppRoute && !user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/sign-in'
+    url.searchParams.set('returnTo', pathname)
+    return NextResponse.redirect(url)
+  }
+
+  // Redirect authenticated users away from auth pages
+  const isAuthRoute = pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up')
+  if (isAuthRoute && user) {
+    return NextResponse.redirect(new URL(`/${slug}/dashboard`, request.url))
   }
 
   return response

@@ -1,20 +1,13 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getUserTradition } from '@/lib/research'
 import { ProposedWeek } from '@/types/database'
 import { SeriesStatus } from '@/types/database'
 import { ensureOutline } from '@/lib/teaching'
-
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
 
 // ── Create series with proposed weeks ─────────────────────────────────────────
 export async function createSeriesAction(
@@ -29,7 +22,8 @@ export async function createSeriesAction(
     weeks: ProposedWeek[]
   }
 ): Promise<{ seriesId?: string; error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
   const tradition = await getUserTradition(user.id)
 
   const { data: series, error: seriesError } = await supabaseAdmin
@@ -77,7 +71,8 @@ export async function updateSeriesAction(
   churchSlug: string,
   updates: { title?: string; description?: string | null; start_date?: string | null; status?: SeriesStatus }
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('series')
@@ -100,7 +95,8 @@ export async function updateSeriesSessionAction(
     liturgical_note?: string | null
   }
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify ownership via series
   const { data: ss } = await supabaseAdmin
@@ -127,7 +123,8 @@ export async function createSessionFromSeriesWeekAction(
   _unusedChurchId: string,   // kept for .bind() arity compat — resolved from series row
   churchSlug: string
 ): Promise<{ sessionId?: string; error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { data: ss } = await supabaseAdmin
     .from('series_sessions')
@@ -175,7 +172,8 @@ export async function archiveSeriesAction(
   seriesId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('series')
@@ -193,7 +191,8 @@ export async function unarchiveSeriesAction(
   seriesId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('series')
@@ -213,7 +212,8 @@ export async function deleteSeriesAction(
   seriesId: string,
   churchSlug: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { data: series } = await supabaseAdmin
     .from('series')

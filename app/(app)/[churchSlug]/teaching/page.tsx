@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { SessionStatus } from '@/types/database'
@@ -26,8 +26,9 @@ export default async function TeachingPage({ params, searchParams }: Props) {
   const showArchived = searchParams.show === 'archived'
 
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return notFound()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/sign-in')
+  const user = session.user
 
   const { data: church } = await supabaseAdmin
     .from('churches').select('id').eq('slug', churchSlug).single()

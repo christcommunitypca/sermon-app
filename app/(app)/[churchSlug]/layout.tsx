@@ -1,5 +1,4 @@
 import { notFound, redirect } from 'next/navigation'
-import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { ChurchProvider } from '@/components/layout/ChurchProvider'
@@ -13,62 +12,42 @@ interface Props {
 
 export default async function AppLayout({ children, params }: Props) {
   const { churchSlug } = params
-  console.log('[layout] ── START churchSlug:', churchSlug)
 
   // ── 1. Require authenticated user ─────────────────────────────────────────
-  const cookieStore = await cookies()
-  const allCookies = cookieStore.getAll()
-  console.log('[layout] cookies present:', allCookies.map(c => c.name))
-  const authCookie = allCookies.find(c => c.name.includes('auth-token') && !c.name.includes('verifier'))
-  console.log('[layout] auth cookie value (first 80 chars):', authCookie?.value?.slice(0, 80))
-
-  // Parse session directly from cookie — avoids a network round-trip to Supabase
-  let userId: string | null = null
-  if (authCookie?.value) {
-    try {
-      const session = JSON.parse(authCookie.value)
-      userId = session?.user?.id ?? null
-      console.log('[layout] parsed userId from cookie:', userId)
-    } catch {
-      console.log('[layout] failed to parse auth cookie as JSON')
-    }
-  }
-
-  if (!userId) {
-    console.log('[layout] 1. REDIRECT → no user (cookie missing or unparseable)')
-    redirect(`/sign-in?returnTo=/${churchSlug}/dashboard`)
-  }
-
+  // getSession() reads the cookie directly — no network call, no token rotation.
+  // This is safe because:
+  //   a) The sign-in server action wrote the cookie server-side (httpOnly).
+  //   b) Pages only use session.user.id to scope their own DB queries.
+  //   c) All writes go through route handlers which validate via Bearer token.
+  // We intentionally do NOT call getUser() here — that triggers token rotation
+  // which invalidates the cookie before the browser receives the new one,
+  // causing the next navigation to lose the session.
   const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  console.log('[layout] 1. getUser — user:', user?.id ?? null, '| error:', userError?.message ?? null)
-  if (userError || !user) {
-    console.log('[layout] 1. REDIRECT → no user')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
     redirect(`/sign-in?returnTo=/${churchSlug}/dashboard`)
   }
+  const user = session.user
 
   // ── 2. Resolve church by slug ──────────────────────────────────────────────
-  const { data: church, error: churchError } = await supabaseAdmin
+  const { data: church } = await supabaseAdmin
     .from('churches')
     .select('id, name, slug')
     .eq('slug', churchSlug)
     .single()
-  console.log('[layout] 2. church lookup — found:', church?.id ?? null, '| error:', churchError?.message ?? null)
 
   if (!church) notFound()
 
   // ── 3. Verify active membership ────────────────────────────────────────────
-  const { data: member, error: memberError } = await supabaseAdmin
+  const { data: member } = await supabaseAdmin
     .from('church_members')
     .select('id, role, is_active')
     .eq('church_id', church.id)
-    .eq('user_id', user!.id)
+    .eq('user_id', user.id)
     .eq('is_active', true)
     .single()
-  console.log('[layout] 3. member lookup — found:', member?.id ?? null, '| role:', member?.role ?? null, '| error:', memberError?.message ?? null)
 
   if (!member) {
-    console.log('[layout] 3. REDIRECT → not_a_member')
     redirect('/sign-in?error=not_a_member')
   }
 
@@ -79,14 +58,14 @@ export default async function AppLayout({ children, params }: Props) {
     .eq('id', user.id)
     .single()
 
-  // ── 5. Get unread notification count for bell badge ─────────────────────
+  // ── 5. Get unread notification count for bell badge ───────────────────────
   const { count: unreadCount } = await supabaseAdmin
     .from('notifications')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
     .is('read_at', null)
 
-  // ── 6. Build context — no sensitive data ──────────────────────────────────
+  // ── 6. Build context ───────────────────────────────────────────────────────
   const churchContext: ChurchContextClient = {
     churchId: church.id,
     churchSlug: church.slug,

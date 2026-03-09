@@ -1,23 +1,17 @@
 'use server'
 
+import { getActionUser } from '@/lib/supabase/auth-context'
+
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { BlockType } from '@/types/database'
-
-async function getAuthUser() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/sign-in')
-  return user!
-}
 
 export async function pinResearchItemAction(
   itemId: string,
   isPinned: boolean
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('research_items')
@@ -32,7 +26,8 @@ export async function pinResearchItemAction(
 export async function dismissResearchItemAction(
   itemId: string
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   const { error } = await supabaseAdmin
     .from('research_items')
@@ -52,7 +47,8 @@ export async function pushResearchToOutlineAction(
   content: string,
   blockType: BlockType
 ): Promise<{ error?: string }> {
-  const user = await getAuthUser()
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh the page.' }
 
   // Verify session ownership
   const { data: session } = await supabaseAdmin
@@ -113,7 +109,7 @@ export async function updateTraditionAction(
   userId: string,
   tradition: string
 ): Promise<{ error?: string }> {
-  await getAuthUser()
+  await getActionUser()
 
   const { error } = await supabaseAdmin
     .from('profiles')

@@ -1,56 +1,125 @@
-# Iteration 2d — Hardening Pass MANIFEST
+# Normalized AI Credentials — MANIFEST
 
-## Changed files (9 files)
+## What this refactor does
 
-### components/research/ResearchItem.tsx
-- `getPushContent`: word_study pushes English word title; theological pushes tradition label title — not paragraphs
-- `isLong` derived as constant (was checked twice in JSX)
-- `metaConnectionType` extracted and rendered as connection type chip on cross-ref cards
-- Practical subcategory badge (Application / Analogy / Insight) shown above title
-- Word study semantic range chips stack on new lines (flex-wrap, no overflow)
-- All `meta.x` accesses use pre-typed variables — no `unknown` in JSX
+Replaces the old `user_ai_keys` table (one row per user, provider-specific columns) with
+`user_ai_credentials` (one row per user per provider). Adding a new AI provider in the future
+requires **zero schema changes**.
 
-### components/research/ResearchWorkspace.tsx
-- Removed `useCallback` import (unused after simplification)
-- `countByCategory` replaced with `categoryCounts` derived object (one pass, not per-tab call)
-- Tab bar uses `scrollbar-none` CSS class instead of `style={{ scrollbarWidth: 'none' }}` — Safari compatible
+### Before
+```
+user_ai_keys
+├── user_id (UNIQUE)           ← one row total per user
+├── openai_key_enc             ← grows with every new provider
+├── anthropic_key_enc          ← already messy after two providers
+├── model_preference           ← ambiguous: which provider's model?
+└── validation_status          ← ambiguous: which provider is validated?
+```
 
-### components/series/SeriesPlanner.tsx
-- Duplicate bottom "Save series" button removed
-- Error moved out of header into proper error banner below header
-- Inline edit now has separate ✓ Done and ✗ Cancel buttons — no accidental edit loss
+### After
+```
+user_ai_credentials
+├── user_id    }  PRIMARY KEY  ← one row per user per provider
+├── provider   }               ← 'openai' | 'anthropic' | 'google'
+├── api_key_enc                ← encrypted key, provider-neutral column name
+├── model_preference           ← nullable, belongs to this (user, provider) pair
+└── validation_status          ← belongs to this (user, provider) pair
+```
 
-### components/series/NewSeriesForm.tsx
-- Non-AI users no longer blocked: "Plan manually" button creates blank week stubs and opens SeriesPlanner directly
-- AI key prompt changed from blocking notice to inline hint alongside the manual button
+---
 
-### components/series/SeriesWeekExpander.tsx
-- `statusStyles` prop removed — defined as static constant inside component
-- `Props` interface simplified
+## Changed files (11 files)
 
-### app/(app)/[churchSlug]/series/[seriesId]/page.tsx
-- `STATUS_STYLES` constant removed (moved into SeriesWeekExpander)
-- `SeriesSessionStatus` and `Flame` imports removed (no longer used here)
-- `statusStyles` prop removed from all SeriesWeekExpander usages
+### supabase/migrations/007_anthropic_key.sql  ← SUPERSEDED
+Replaced by 008. If 007 has not yet been applied, skip it and apply 008 directly.
+If 007 was already applied, 008 handles the migration safely (drops user_ai_keys after copying data).
 
-### components/ui/ArchiveDeleteMenu.tsx
-- Trigger button: `min-h-[44px] min-w-[44px]` with flex centering — meets iOS 44px touch target
-- `iconSize` variable removed, icon size inlined directly
+### supabase/migrations/008_normalize_ai_credentials.sql  ← NEW
+- Creates `user_ai_credentials` with composite PK `(user_id, provider)`
+- Migrates existing `openai_key_enc` rows → provider='openai' rows
+- Migrates existing `anthropic_key_enc` rows → provider='anthropic' rows (marked 'untested')
+- Drops `user_ai_keys`
+- Idempotent: safe on empty DB or DB with existing data
+
+### lib/ai/key.ts  ← COMPLETE REWRITE
+- All queries target `user_ai_credentials` with `.eq('provider', provider)` filter
+- Encryption/decryption logic unchanged
+- `validatePlainKey(plainKey, provider)` dispatches to provider-specific validators
+- Single `AI_MOCK_VALIDATION=true` env var replaces `OPENAI_MOCK_VALIDATION` + `ANTHROPIC_MOCK_VALIDATION`
+- `saveAndValidateKey(userId, plainKey, modelPreference, provider)` — upserts on `(user_id, provider)`
+- `validateExistingKey(userId, provider)` — provider required, no default
+- `getKeyStatus(userId, provider)` — provider required
+- `hasValidKey(userId, provider)` — provider required
+- `getDecryptedKey(userId, provider)` — used only by service.ts
 
 ### lib/ai/service.ts
-- `buildSourceLabel` parameter type changed from anonymous `{ subcategory?: string; metadata?: Record<string, unknown> }` to explicit nullable fields — cleaner, matches actual RawItem shape
+- `resolveCredentials()` calls `getDecryptedKey(userId, provider)` — clean, no raw SQL
+- `resolveCredentials()` provides distinct "key missing" vs "key invalid" error messages
+- Dynamic import of supabaseAdmin removed; uses key.ts exclusively
 
-### app/globals.css
-- `scrollbar-none` utility already added in previous pass — confirmed present
+### lib/ai/providers/resolver.ts
+- Unchanged functionally; `getActiveProviderName()` and `getProvider()` still the same
 
-## New files
-None.
+### app/api/settings/ai-key/route.ts
+- Queries `user_ai_credentials`, passes provider to all key.ts functions
+- DELETE removes only the active provider's row (not all credentials)
 
-## Deleted files
-None.
+### app/api/settings/ai-key/validate/route.ts
+- Passes `provider` to `validateExistingKey` and `getKeyStatus`
 
-## Database / migrations
-None. No schema changes.
+### app/(app)/[churchSlug]/settings/ai/page.tsx
+- Fixed: `getKeyStatus(user.id, activeProvider)` — provider now correctly passed
+- `activeProvider` resolved before `getKeyStatus` call
 
-## TypeScript errors fixed
-None introduced. Pre-existing "Cannot find module 'next'" errors are a node_modules environment issue, present on all files before this pass.
+### app/(app)/[churchSlug]/teaching/[sessionId]/page.tsx
+- Replaced inline `user_ai_keys` query with `hasValidKey(user.id, getActiveProviderName())`
+
+### app/(app)/[churchSlug]/teaching/[sessionId]/research/page.tsx
+- Replaced inline `user_ai_keys` query with `hasValidKey(user.id, getActiveProviderName())`
+
+### app/(app)/[churchSlug]/series/new/page.tsx
+- Replaced inline `user_ai_keys` query with `hasValidKey(user.id, getActiveProviderName())`
+
+### app/(app)/[churchSlug]/dashboard/page.tsx
+- Replaced inline `user_ai_keys` query with `hasValidKey(user.id, getActiveProviderName())`
+
+### types/database.ts
+- `UserAIKey` → `UserAICredential` (new interface, normalized shape)
+- `SupportedAIProvider = 'openai' | 'anthropic' | 'google'` type added
+- `UserAIKey` retained as `@deprecated` stub for reference during migration
+
+### .env.example
+- `OPENAI_MOCK_VALIDATION` + `ANTHROPIC_MOCK_VALIDATION` → single `AI_MOCK_VALIDATION`
+- ENCRYPTION_SECRET comment updated (no longer says "OpenAI")
+- `AI_PROVIDER=anthropic` as default for local dev
+
+---
+
+## Runtime credential resolution order
+
+```
+Every AI feature call:
+  1. AI_PROVIDER env var → selects active provider name (default: 'openai')
+  2. getActiveProviderName() → 'openai' | 'anthropic'
+  3. getDecryptedKey(userId, provider)
+       → SELECT api_key_enc, model_preference, validation_status
+            FROM user_ai_credentials
+           WHERE user_id = $userId AND provider = $provider
+  4. Require validation_status = 'valid' → else throw AIError('key_invalid')
+  5. decryptKey(api_key_enc) → plain API key
+  6. pickModel(model_preference, provider) → model string
+  7. provider.complete({ apiKey, model }, prompt)
+```
+
+**There is no env-based key fallback.** All API keys are user-stored and encrypted.
+This keeps per-teacher credentials clean and auditable.
+
+---
+
+## Files not changed (confirmed)
+- `lib/ai/providers/openai.ts` — untouched
+- `lib/ai/providers/anthropic.ts` — untouched
+- `lib/ai/prompts/*` — untouched
+- `lib/ai/types.ts` — untouched
+- `components/settings/AIKeySettings.tsx` — untouched (already provider-aware)
+- All other app pages and components — untouched

@@ -60,7 +60,7 @@ ${input.sessionNotes ? `Notes from pastor: ${input.sessionNotes}` : ''}
 
 Which words in this passage have the most original-language depth for preaching?`
 
-  return { system, user, version: VERSION, temperature: 0.3, maxTokens: 2500 }
+  return { system, user, version: VERSION, temperature: 0.3 }
 }
 
 // ── Related texts ──────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ Tradition: ${traditionDisplayName(input.tradition)}
 
 Find the most useful cross-references for preaching this passage.`
 
-  return { system, user, version: VERSION, temperature: 0.3, maxTokens: 1500 }
+  return { system, user, version: VERSION, temperature: 0.3 }
 }
 
 // ── Theological ────────────────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ Session: "${input.sessionTitle}"
 How do theologians in the ${tradName} tradition interpret this passage?
 Then: where do other traditions genuinely interpret it differently?`
 
-  return { system, user, version: VERSION, temperature: 0.3, maxTokens: 2000 }
+  return { system, user, version: VERSION, temperature: 0.3 }
 }
 
 // ── Practical ─────────────────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ ${input.sessionNotes ? `Pastor's notes: ${input.sessionNotes}` : ''}
 
 Generate practical preaching material for this passage.`
 
-  return { system, user, version: VERSION, temperature: 0.45, maxTokens: 2000 }
+  return { system, user, version: VERSION, temperature: 0.45 }
 }
 
 // ── Historical ────────────────────────────────────────────────────────────────
@@ -181,5 +181,5 @@ Session: "${input.sessionTitle}"
 
 What historical and cultural context is most useful for preaching this passage?`
 
-  return { system, user, version: VERSION, temperature: 0.3, maxTokens: 1500 }
+  return { system, user, version: VERSION, temperature: 0.3 }
 }

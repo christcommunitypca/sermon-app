@@ -14,6 +14,7 @@
 
 import type { AIProvider, PromptPayload, ProviderCredentials, ProviderCompletion } from '@/lib/ai/types'
 import { AIError } from '@/lib/ai/types'
+import { getModelMaxOutputTokens } from '@/lib/ai/key'
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -38,7 +39,14 @@ export class AnthropicProvider implements AIProvider {
         },
         body: JSON.stringify({
           model: creds.model,
-          max_tokens: prompt.maxTokens ?? 2000,
+          // Use the lesser of: what this prompt needs vs what this model supports.
+          // prompt.maxTokens is a task ceiling (e.g. tags need 300, outlines need more).
+          // getModelMaxOutputTokens caps it at the model's actual limit.
+          // Neither value is hard-coded in prompt files — add new models to key.ts only.
+          max_tokens: Math.min(
+            prompt.maxTokens ?? getModelMaxOutputTokens(creds.model),
+            getModelMaxOutputTokens(creds.model)
+          ),
           temperature: prompt.temperature ?? 0.4,
           system: prompt.system,
           messages: [
@@ -78,16 +86,41 @@ export class AnthropicProvider implements AIProvider {
 
     const raw = data.content?.find(b => b.type === 'text')?.text ?? ''
 
-    // Strip markdown fences if the model wraps its JSON response
-    const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+    // Extract JSON from the response, handling:
+    // - Markdown fences (```json ... ```)
+    // - Preamble text before the JSON ("Here is the outline: [...")
+    // - Trailing text after the JSON
+    const stripped = raw
+      .replace(/^```(?:json)?\s*\n?/m, '')
+      .replace(/\n?```\s*$/m, '')
+      .trim()
+
+    // Find the outermost [ ] or { } bounds
+    const startArr = stripped.indexOf('[')
+    const startObj = stripped.indexOf('{')
+    let jsonStr = stripped
+    if (startArr !== -1 || startObj !== -1) {
+      let start: number, endChar: string
+      if (startArr === -1) { start = startObj; endChar = '}' }
+      else if (startObj === -1) { start = startArr; endChar = ']' }
+      else if (startArr < startObj) { start = startArr; endChar = ']' }
+      else { start = startObj; endChar = '}' }
+      const end = stripped.lastIndexOf(endChar)
+      if (end > start) jsonStr = stripped.slice(start, end + 1)
+    }
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(cleaned)
+      parsed = JSON.parse(jsonStr)
     } catch {
+      // Detect likely truncation: response doesn't end with ] or }
+      const looksLikeTruncated = !jsonStr.trimEnd().match(/[}\]]['"]?\s*$/)
+      const hint = looksLikeTruncated
+        ? ' (response appears truncated — try again or reduce scope)'
+        : ''
       throw new AIError(
         'malformed_response',
-        `Could not parse Anthropic response as JSON. Raw: ${cleaned.slice(0, 200)}`
+        `Could not parse AI response as JSON${hint}. Raw: ${jsonStr.slice(0, 300)}`
       )
     }
 

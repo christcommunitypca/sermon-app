@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import { Mic, Type, Trash2, Upload, FileAudio, Plus } from 'lucide-react'
 import { ThoughtCapture as ThoughtCaptureType } from '@/types/database'
 import { addTextThoughtAction, deleteThoughtAction } from '@/app/(app)/[churchSlug]/teaching/[sessionId]/thought-actions'
-import { createClient } from '@/lib/supabase/client'
+import { getStorageClient } from '@/lib/supabase/storage-client'
 
 interface Props {
   sessionId: string
@@ -20,7 +20,6 @@ export function ThoughtCapture({ sessionId, churchId, churchSlug, initialThought
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const supabase = createClient()
 
   async function handleAddText() {
     if (!text.trim()) return
@@ -58,7 +57,7 @@ export function ThoughtCapture({ sessionId, churchId, churchSlug, initialThought
     setError(null)
 
     const path = `thoughts/${sessionId}/${Date.now()}-${file.name}`
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await getStorageClient().storage
       .from('thought-captures')
       .upload(path, file)
 

@@ -148,6 +148,26 @@ export const PROVIDER_DEFAULT_MODEL: Record<SupportedProvider, string> = {
   anthropic: 'claude-sonnet-4-6',
 }
 
+// Max output tokens per known model.
+// Used by providers to cap requests correctly without hard-coding values in prompts.
+// When a model isn't listed here, the provider falls back to its own safe default.
+// Update this table when adding new models — don't change prompt maxTokens values.
+export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
+  // Anthropic
+  'claude-sonnet-4-6':          8192,
+  'claude-opus-4-6':            8192,
+  'claude-haiku-4-5-20251001':  8192,
+  // OpenAI
+  'gpt-4o':                    16384,
+  'gpt-4o-mini':               16384,
+  'gpt-4-turbo':                4096,
+}
+
+// Returns the max output tokens for a given model, with a conservative fallback.
+export function getModelMaxOutputTokens(model: string): number {
+  return MODEL_MAX_OUTPUT_TOKENS[model] ?? 4096
+}
+
 // ── Database helpers ──────────────────────────────────────────────────────────
 // All credential DB access goes through these. No other file queries
 // user_ai_credentials for key material.

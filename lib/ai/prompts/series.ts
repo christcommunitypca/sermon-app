@@ -32,5 +32,5 @@ ${input.liturgicalContext}
 
 Plan a ${input.totalWeeks}-week series through ${input.scriptureSection}.`
 
-  return { system, user, version: VERSION, temperature: 0.4, maxTokens: 3000 }
+  return { system, user, version: VERSION, temperature: 0.4 }
 }

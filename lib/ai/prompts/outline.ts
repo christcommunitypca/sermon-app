@@ -47,5 +47,5 @@ ${thoughtText}
 
 Return a JSON array of outline blocks only.`
 
-  return { system, user, version: VERSION, temperature: 0.4, maxTokens: 2000 }
+  return { system, user, version: VERSION, temperature: 0.4 }
 }

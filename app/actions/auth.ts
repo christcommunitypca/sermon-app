@@ -37,3 +37,23 @@ export async function markAllNotificationsReadAction(userId: string) {
     .eq('user_id', userId)
     .is('read_at', null)
 }
+
+// ── Profile update ───────────────────────────────────────────────────────────
+export async function updateProfileAction(input: {
+  userId: string
+  fullName: string | null
+  bio: string | null
+  avatarUrl: string | null
+}) {
+  const { supabaseAdmin } = await import('@/lib/supabase/admin')
+  const { error } = await supabaseAdmin
+    .from('profiles')
+    .upsert({
+      id: input.userId,
+      full_name: input.fullName,
+      bio: input.bio,
+      avatar_url: input.avatarUrl,
+      updated_at: new Date().toISOString(),
+    })
+  return { error: error?.message ?? null }
+}

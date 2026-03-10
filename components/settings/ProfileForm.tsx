@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { getStorageClient } from '@/lib/supabase/storage-client'
+import { updateProfileAction } from '@/app/actions/auth'
 import { Profile } from '@/types/database'
 import { Camera } from 'lucide-react'
 
@@ -11,7 +12,6 @@ interface Props {
 }
 
 export function ProfileForm({ initialProfile, userId }: Props) {
-  const supabase = createClient()
   const [fullName, setFullName] = useState(initialProfile?.full_name ?? '')
   const [bio, setBio] = useState(initialProfile?.bio ?? '')
   const [avatarUrl, setAvatarUrl] = useState(initialProfile?.avatar_url ?? '')
@@ -28,14 +28,14 @@ export function ProfileForm({ initialProfile, userId }: Props) {
     const ext = file.name.split('.').pop()
     const path = `avatars/${userId}.${ext}`
 
-    const { error } = await supabase.storage
+    const { error } = await getStorageClient().storage
       .from('user-assets')
       .upload(path, file, { upsert: true })
 
     if (error) {
       setMessage({ type: 'error', text: error.message })
     } else {
-      const { data: { publicUrl } } = supabase.storage.from('user-assets').getPublicUrl(path)
+      const { data: { publicUrl } } = getStorageClient().storage.from('user-assets').getPublicUrl(path)
       setAvatarUrl(publicUrl)
     }
     setUploading(false)
@@ -46,18 +46,15 @@ export function ProfileForm({ initialProfile, userId }: Props) {
     setSaving(true)
     setMessage(null)
 
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: userId,
-        full_name: fullName.trim() || null,
-        bio: bio.trim() || null,
-        avatar_url: avatarUrl || null,
-        updated_at: new Date().toISOString(),
-      })
+    const { error } = await updateProfileAction({
+      userId,
+      fullName: fullName.trim() || null,
+      bio: bio.trim() || null,
+      avatarUrl: avatarUrl || null,
+    })
 
     setMessage(error
-      ? { type: 'error', text: error.message }
+      ? { type: 'error', text: error }
       : { type: 'success', text: 'Profile saved.' }
     )
     setSaving(false)

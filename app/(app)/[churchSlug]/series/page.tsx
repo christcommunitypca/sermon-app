@@ -25,9 +25,9 @@ export default async function SeriesListPage({ params, searchParams }: Props) {
   const showArchived = searchParams.show === 'archived'
 
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/sign-in')
-  const user = session.user
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const { data: church } = await supabaseAdmin
     .from('churches').select('id').eq('slug', churchSlug).single()
@@ -113,19 +113,25 @@ export default async function SeriesListPage({ params, searchParams }: Props) {
               <Link href={`/${churchSlug}/series/${s.id}`}
                 className={`flex-1 flex items-start gap-4 bg-white border rounded-xl px-5 py-4 hover:border-slate-300 hover:shadow-sm transition-all min-w-0 ${s.status === 'archived' ? 'border-stone-200 opacity-75' : 'border-slate-100'}`}>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-slate-900 truncate">{s.title}</span>
-                    <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[s.status]}`}>
-                      {s.status}
-                    </span>
-                  </div>
+                  <p className="font-semibold text-slate-900 truncate mb-1">{s.title}</p>
                   <div className="flex items-center gap-3 text-xs text-slate-400">
                     {s.scripture_section && <span className="flex items-center gap-1"><BookOpen className="w-3 h-3" />{s.scripture_section}</span>}
                     {s.total_weeks && <span>{s.total_weeks} weeks</span>}
-                    {s.start_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(s.start_date).toLocaleDateString()}</span>}
+                    {s.start_date && (() => {
+                      const start = new Date(s.start_date + 'T00:00:00')
+                      const startLabel = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      if (!s.total_weeks) return (
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{startLabel}</span>
+                      )
+                      const end = new Date(s.start_date + 'T00:00:00')
+                      end.setDate(end.getDate() + (s.total_weeks - 1) * 7)
+                      const endLabel = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      return (
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{startLabel} — {endLabel}</span>
+                      )
+                    })()}
                   </div>
                 </div>
-                <span className="text-xs text-slate-300 shrink-0 mt-0.5">{new Date(s.updated_at).toLocaleDateString()}</span>
               </Link>
               <SeriesRowActions
                 seriesId={s.id}

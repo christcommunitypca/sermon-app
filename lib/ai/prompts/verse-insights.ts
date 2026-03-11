@@ -59,9 +59,19 @@ export function buildBatchPrompt(
       const notesLine = notes?.length
         ? `\n  Pastor notes: ${notes.join(' | ')}`
         : ''
-      return `[${v.verse_ref}] ${v.text}${notesLine}`
+      const words = input.selectedWords?.[v.verse_ref]
+      const wordsLine = words?.length
+        ? `\n  Study these specific words: ${words.join(', ')}`
+        : ''
+      return `[${v.verse_ref}] ${v.text}${notesLine}${wordsLine}`
     })
     .join('\n')
+
+  // If teacher selected specific words, make sure the instruction is prominent
+  const hasSelectedWords = Object.values(input.selectedWords ?? {}).some(w => w.length > 0)
+  const wordStudyInstruction = hasSelectedWords
+    ? '\n- WORD STUDY: The teacher has selected specific words for study (marked "Study these specific words"). For those verses, focus word_study items ONLY on the specified words, in the order given.'
+    : ''
 
   const categorySpec = categories.map(cat =>
     `"${cat}": ${CATEGORY_DESCRIPTIONS[cat]}`

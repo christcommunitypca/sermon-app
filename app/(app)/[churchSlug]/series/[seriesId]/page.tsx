@@ -2,8 +2,8 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getSeriesWithSessions } from '@/lib/series'
-import { ChevronLeft, BookOpen, Calendar, ExternalLink, Plus } from 'lucide-react'
-import { createSessionFromSeriesWeekAction, insertGapAfterWeekAction } from '../actions'
+import { ChevronLeft, BookOpen, Calendar, Plus } from 'lucide-react'
+import { createSessionFromSeriesWeekAction } from '../actions'
 import { SeriesWeekExpander } from '@/components/series/SeriesWeekExpander'
 
 interface Props { params: { churchSlug: string; seriesId: string } }
@@ -22,15 +22,46 @@ export default async function SeriesDetailPage({ params }: Props) {
 
   async function createWeekSession(seriesSessionId: string): Promise<void> {
     'use server'
-    // createSessionFromSeriesWeekAction now calls redirect() internally
     await createSessionFromSeriesWeekAction(seriesSessionId, seriesId, '', churchSlug)
   }
 
-  const nextWeek = sessions.find(s => s.status !== 'delivered')
+  // Compute date range from start_date + total_weeks
+  function computeWeekDate(weekNumber: number): string | null {
+    if (!series.start_date) return null
+    const d = new Date(series.start_date + 'T00:00:00')
+    d.setDate(d.getDate() + (weekNumber - 1) * 7)
+    return d.toISOString().split('T')[0]
+  }
+
+  const endDate = series.start_date && sessions.length > 0
+    ? (() => {
+        const maxWeek = Math.max(...sessions.map(s => s.week_number))
+        const d = new Date(series.start_date + 'T00:00:00')
+        d.setDate(d.getDate() + (maxWeek - 1) * 7)
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      })()
+    : null
 
   const startLabel = series.start_date
-    ? new Date(series.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    ? new Date(series.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : null
+
+  // Auto-derive status from sessions — no manual status needed
+  const deliveredCount = sessions.filter(s => s.status === 'delivered').length
+  const createdCount   = sessions.filter(s => s.session_id).length
+  const derivedStatus =
+    series.status === 'archived'         ? 'archived' :
+    deliveredCount === sessions.length   ? 'completed' :
+    createdCount > 0                     ? 'active' :
+    'planning'
+
+  const statusStyle =
+    derivedStatus === 'active'     ? 'bg-emerald-100 text-emerald-700' :
+    derivedStatus === 'completed'  ? 'bg-blue-100 text-blue-700' :
+    derivedStatus === 'archived'   ? 'bg-stone-100 text-stone-500' :
+    'bg-slate-100 text-slate-500'
+
+  const nextWeek = sessions.find(s => s.status !== 'delivered' && s.week_type === 'normal')
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -41,7 +72,12 @@ export default async function SeriesDetailPage({ params }: Props) {
 
       {/* Series header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-5">
-        <h1 className="text-xl font-bold text-slate-900 mb-2">{series.title}</h1>
+        <div className="flex items-start justify-between gap-4 mb-2">
+          <h1 className="text-xl font-bold text-slate-900">{series.title}</h1>
+          <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${statusStyle}`}>
+            {derivedStatus}
+          </span>
+        </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-slate-500">
           {series.scripture_section && (
             <span className="flex items-center gap-1.5">
@@ -49,17 +85,17 @@ export default async function SeriesDetailPage({ params }: Props) {
             </span>
           )}
           {series.total_weeks && <span>{series.total_weeks} weeks</span>}
-          {startLabel && (
+          {startLabel && endDate && (
+            <span className="flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 shrink-0" />
+              {startLabel} — {endDate}
+            </span>
+          )}
+          {startLabel && !endDate && (
             <span className="flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 shrink-0" />{startLabel}
             </span>
           )}
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            series.status === 'active'    ? 'bg-emerald-100 text-emerald-700' :
-            series.status === 'completed' ? 'bg-blue-100 text-blue-700' :
-            series.status === 'archived'  ? 'bg-stone-100 text-stone-500' :
-            'bg-slate-100 text-slate-600'
-          }`}>{series.status}</span>
         </div>
         {series.description && (
           <p className="mt-3 text-sm text-slate-600 leading-relaxed">{series.description}</p>
@@ -89,13 +125,14 @@ export default async function SeriesDetailPage({ params }: Props) {
         <div className="mb-5 px-4 py-3.5 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs text-blue-600 font-medium mb-0.5">In progress — Week {nextWeek.week_number}</p>
-            <p className="text-sm font-semibold text-blue-900 truncate">
+            <Link href={`/${churchSlug}/teaching/${nextWeek.session_id}`}
+              className="text-sm font-semibold text-blue-900 hover:text-blue-700 truncate block transition-colors">
               {(nextWeek as any).teaching_sessions?.title ?? nextWeek.proposed_title}
-            </p>
+            </Link>
           </div>
           <Link href={`/${churchSlug}/teaching/${nextWeek.session_id}`}
             className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors shrink-0">
-            <ExternalLink className="w-3.5 h-3.5" />Open
+            Open
           </Link>
         </div>
       )}
@@ -107,22 +144,26 @@ export default async function SeriesDetailPage({ params }: Props) {
 
       <div className="space-y-2">
         {sessions.map(ss => {
-          const weekDate = series.start_date
-            ? (() => {
-                const d = new Date(series.start_date)
-                d.setDate(d.getDate() + (ss.week_number - 1) * 7)
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-              })()
+          const weekDateStr = computeWeekDate(ss.week_number)
+          const weekDateLabel = weekDateStr
+            ? new Date(weekDateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
             : null
 
           const linkedSession = (ss as any).teaching_sessions
+
+          // Detect conflict: session has a scheduled_date that differs from computed
+          const sessionScheduledDate = linkedSession?.scheduled_date as string | null
+          const hasConflict = !!(weekDateStr && sessionScheduledDate && sessionScheduledDate !== weekDateStr)
 
           return (
             <SeriesWeekExpander
               key={ss.id}
               ss={ss}
               linkedSession={linkedSession}
-              weekDate={weekDate}
+              weekDate={weekDateLabel}
+              weekDateIso={weekDateStr}
+              hasConflict={hasConflict}
+              conflictDate={hasConflict ? sessionScheduledDate : null}
               churchSlug={churchSlug}
               seriesId={seriesId}
               createWeekSession={createWeekSession}

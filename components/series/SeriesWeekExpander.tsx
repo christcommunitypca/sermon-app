@@ -12,7 +12,6 @@ import {
   setGuestPreacherAction,
   restoreWeekAction,
   updateSkippedWeekAction,
-  insertGapAfterWeekAction,
 } from '@/app/(app)/[churchSlug]/series/actions'
 
 // ── Badge styles per week type ─────────────────────────────────────────────────
@@ -26,15 +25,19 @@ type PanelMode = null | 'skip' | 'guest'
 
 interface Props {
   ss:                SeriesSession
-  linkedSession:     { title: string } | null
-  weekDate:          string | null
+  linkedSession:     { title: string; scheduled_date?: string | null } | null
+  weekDate:          string | null        // display label e.g. "Mar 9"
+  weekDateIso:       string | null        // ISO date from series e.g. "2025-03-09"
+  hasConflict:       boolean              // session.scheduled_date ≠ computed series date
+  conflictDate:      string | null        // what the session says vs series
   churchSlug:        string
   seriesId:          string
   createWeekSession: (id: string) => Promise<void>
 }
 
 export function SeriesWeekExpander({
-  ss, linkedSession, weekDate, churchSlug, seriesId, createWeekSession,
+  ss, linkedSession, weekDate, weekDateIso, hasConflict, conflictDate,
+  churchSlug, seriesId, createWeekSession,
 }: Props) {
   const [panel,        setPanel]        = useState<PanelMode>(null)
   const [saving,       setSaving]       = useState(false)
@@ -51,6 +54,8 @@ export function SeriesWeekExpander({
   // Skipped week editable fields
   const [editTitle,    setEditTitle]    = useState(ss.proposed_title ?? '')
   const [editScripture,setEditScripture]= useState(ss.proposed_scripture ?? '')
+
+  const [conflictPanel, setConflictPanel] = useState(false)
 
   // Options dropdown
   const [optionsOpen,  setOptionsOpen]  = useState(false)
@@ -75,14 +80,9 @@ export function SeriesWeekExpander({
 
   async function handleSkip() {
     setSaving(true); setSaveError(null)
-    const result = await skipWeekAction(ss.id, seriesId, churchSlug, skipReason || null)
-    if (result.error) { setSaveError(result.error); setSaving(false); return }
-    // If pushWeeks, insert a gap so subsequent weeks shift out by one
-    if (pushWeeks) {
-      const gapResult = await insertGapAfterWeekAction(seriesId, ss.week_number, churchSlug)
-      if (gapResult.error) { setSaveError(gapResult.error); setSaving(false); return }
-    }
+    const result = await skipWeekAction(ss.id, seriesId, churchSlug, skipReason || null, pushWeeks)
     setSaving(false)
+    if (result.error) { setSaveError(result.error); return }
     setPanel(null)
   }
 
@@ -124,7 +124,7 @@ export function SeriesWeekExpander({
     : linkedSession?.title ?? ss.proposed_title ?? `Week ${ss.week_number}`
 
   return (
-    <div className={`bg-white border rounded-xl overflow-hidden transition-all ${rowBorder}`}>
+    <div className={`bg-white border rounded-xl transition-all ${rowBorder}`}>
 
       {/* ── Main row ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-4 py-3">
@@ -141,9 +141,24 @@ export function SeriesWeekExpander({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-sm font-medium truncate ${isSkipped ? 'text-slate-400 italic' : 'text-slate-900'}`}>
-              {isSkipped ? (ss.proposed_title || 'Skipped') : displayTitle}
-            </span>
+            {/* Title — link to lesson if session exists */}
+            {ss.session_id && isNormal ? (
+              <a href={`/${churchSlug}/teaching/${ss.session_id}`}
+                className="text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline truncate transition-colors">
+                {displayTitle}
+              </a>
+            ) : (
+              <span className={`text-sm font-medium truncate ${isSkipped ? 'text-slate-400 italic' : 'text-slate-900'}`}>
+                {isSkipped ? (ss.proposed_title || 'Skipped') : displayTitle}
+              </span>
+            )}
+            {/* Conflict badge */}
+            {hasConflict && (
+              <button onClick={() => setConflictPanel(c => !c)}
+                className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition-colors">
+                ⚠ Date conflict
+              </button>
+            )}
 
             {/* Status badge — only for normal weeks */}
             {isNormal && (
@@ -182,10 +197,10 @@ export function SeriesWeekExpander({
                   <Flame className="w-3 h-3" />Liturgical note
                 </span>
                 {/* Tooltip */}
-                <span className="absolute bottom-full left-0 mb-1.5 z-30 w-64 px-3 py-2 bg-amber-950 text-amber-100 text-xs rounded-xl shadow-lg
+                <span className="absolute top-full left-0 mt-1.5 z-50 w-64 px-3 py-2 bg-amber-950 text-amber-100 text-xs rounded-xl shadow-lg
                   opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 leading-relaxed">
                   {ss.liturgical_note}
-                  <span className="absolute top-full left-4 border-4 border-transparent border-t-amber-950" />
+                  <span className="absolute bottom-full left-4 border-4 border-transparent border-b-amber-950" />
                 </span>
               </span>
             )}
@@ -236,7 +251,7 @@ export function SeriesWeekExpander({
             </button>
 
             {optionsOpen && (
-              <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1 text-sm">
+              <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1 text-sm">
                 <button
                   onClick={() => { setPanel('skip'); setOptionsOpen(false) }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 transition-colors"
@@ -257,7 +272,7 @@ export function SeriesWeekExpander({
 
       {/* ── Skipped week: editable title/scripture ───────────────────────────── */}
       {isSkipped && (
-        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/60 space-y-2">
+        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/60 space-y-2 rounded-b-xl">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
             Skipped week — optional details
           </p>
@@ -279,6 +294,35 @@ export function SeriesWeekExpander({
               {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Conflict panel ───────────────────────────────────────────────────── */}
+      {hasConflict && conflictPanel && (
+        <div className="border-t border-amber-100 px-4 py-3 bg-amber-50/60 rounded-b-xl">
+          <div className="flex items-start gap-2 mb-3">
+            <span className="text-amber-600 text-sm">⚠</span>
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Date conflict</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Series expects <strong>{weekDate}</strong>, but this lesson is scheduled for{' '}
+                <strong>{conflictDate ? new Date(conflictDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</strong>.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <a href={`/${churchSlug}/teaching/${ss.session_id}/edit`}
+              className="px-3 py-1.5 text-xs font-semibold bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors">
+              Edit lesson date
+            </a>
+            <button onClick={() => setConflictPanel(false)}
+              className="px-3 py-1.5 text-xs font-medium text-amber-700 hover:text-amber-900 transition-colors">
+              Dismiss
+            </button>
+          </div>
+          <p className="text-[10px] text-amber-500 mt-2">
+            "Swap" and "Move out" will be available when the Church Calendar feature ships.
+          </p>
         </div>
       )}
 
@@ -379,7 +423,7 @@ function ActionPanel({
   error: string | null
 }) {
   return (
-    <div className="border-t border-slate-100 px-4 py-4 bg-slate-50/50">
+    <div className="border-t border-slate-100 px-4 py-4 bg-slate-50/50 rounded-b-xl">
       <div className="flex items-center gap-2 mb-3">
         {icon}
         <span className="text-sm font-semibold text-slate-700">{title}</span>

@@ -8,7 +8,6 @@ import { TeachingWorkspace } from '@/components/teaching/TeachingWorkspace'
 import { SessionStatus } from '@/types/database'
 import { hasValidKey } from '@/lib/ai/key'
 import { getActiveProviderName } from '@/lib/ai/providers/resolver'
-import { fetchPassage } from '@/lib/esv'
 import {
   ChevronLeft, Edit, Tag, Clock, FileText,
   Presentation, FlaskConical
@@ -61,12 +60,6 @@ export default async function SessionDetailPage({ params }: Props) {
   let initialVerseNotes: Record<string, import('@/types/database').VerseNote[]> = {}
 
   if (session.scripture_ref) {
-    try {
-      initialVerses = await fetchPassage(session.scripture_ref)
-    } catch {
-      // ESV key not set or network issue — client handles gracefully
-    }
-
     const [{ data: insightRows }, { data: noteRows }] = await Promise.all([
       supabaseAdmin
         .from('verse_insights')
@@ -112,10 +105,17 @@ export default async function SessionDetailPage({ params }: Props) {
             </form>
           )}
           {!isArchived && (
-            <Link href={`/${churchSlug}/deliver/${sessionId}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">
-              <Presentation className="w-3.5 h-3.5" />Deliver
-            </Link>
+            session.status === 'published' ? (
+              <Link href={`/${churchSlug}/deliver/${sessionId}`}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">
+                <Presentation className="w-3.5 h-3.5" />Deliver
+              </Link>
+            ) : session.status !== 'delivered' ? (
+              <span title="Publish this session before delivering"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 text-slate-400 rounded-lg cursor-not-allowed select-none">
+                <Presentation className="w-3.5 h-3.5" />Deliver
+              </span>
+            ) : null
           )}
           <SessionDetailActions sessionId={sessionId} churchId={church.id} churchSlug={churchSlug} isArchived={isArchived} />
         </div>
@@ -136,11 +136,18 @@ export default async function SessionDetailPage({ params }: Props) {
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
               <span>{session.type.replace('_', ' ')}</span>
               {session.scripture_ref && <span>· {session.scripture_ref}</span>}
-              {session.estimated_duration && (
+              {(session as any).scheduled_date && (
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />{session.estimated_duration}m
+                  <Clock className="w-3.5 h-3.5" />
+                  {new Date((session as any).scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                 </span>
               )}
+              {session.estimated_duration && (
+                <span className="flex items-center gap-1 text-slate-400">
+                  {session.estimated_duration}m
+                </span>
+              )}
+
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                 session.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                 session.status === 'published' ? 'bg-blue-100 text-blue-700' :

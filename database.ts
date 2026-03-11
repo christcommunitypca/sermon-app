@@ -343,6 +343,7 @@ export interface SeriesSession {
   skip_reason: string | null
   guest_name: string | null
   guest_in_series: boolean
+  computed_date: string | null   // series.start_date + (week_number-1)*7 days
   created_at: string
 }
 

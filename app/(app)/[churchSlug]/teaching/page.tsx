@@ -26,9 +26,9 @@ export default async function TeachingPage({ params, searchParams }: Props) {
   const showArchived = searchParams.show === 'archived'
 
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/sign-in')
-  const user = session.user
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const { data: church } = await supabaseAdmin
     .from('churches').select('id').eq('slug', churchSlug).single()
@@ -37,7 +37,7 @@ export default async function TeachingPage({ params, searchParams }: Props) {
   // Fetch relevant sessions based on view
   const query = supabaseAdmin
     .from('teaching_sessions')
-    .select('id, title, type, status, scripture_ref, estimated_duration, updated_at')
+    .select('id, title, type, status, scripture_ref, estimated_duration, scheduled_date, updated_at')
     .eq('church_id', church.id)
     .eq('teacher_id', user.id)
     .order('updated_at', { ascending: false })
@@ -156,9 +156,15 @@ export default async function TeachingPage({ params, searchParams }: Props) {
                             )}
                           </div>
                         </div>
-                        <span className="shrink-0 text-xs text-slate-300">
-                          {new Date(session.updated_at).toLocaleDateString()}
-                        </span>
+                        <div className="shrink-0 text-right">
+                          {session.scheduled_date ? (
+                            <p className="text-xs font-semibold text-slate-600">
+                              {new Date(session.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-300">No date set</p>
+                          )}
+                        </div>
                       </Link>
                       <SessionRowActions
                         sessionId={session.id}

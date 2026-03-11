@@ -163,7 +163,8 @@ export interface VerseInsightInput {
   sessionTitle: string
   sessionType: string
   tradition: string
-  pastorNotes?: Record<string, string[]>  // verse_ref → notes[], sent as context to AI
+  pastorNotes?: Record<string, string[]>   // verse_ref → notes[], sent as context to AI
+  selectedWords?: Record<string, string[]> // verse_ref → words teacher wants studied
 }
 
 export interface InsightItem {

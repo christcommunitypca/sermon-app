@@ -82,6 +82,9 @@ export function VerseByVersePanel({
 
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
+  // Word selection: verse_ref → Set of selected words (max 5 per verse)
+  const [selectedWords, setSelectedWords] = useState<Record<string, string[]>>({})
+
   const hasEsv      = !!verses?.length
   const hasInsights = Object.keys(insights).length > 0
   const hasNotes    = Object.values(verseNotes).some(arr => arr.length > 0)
@@ -91,6 +94,22 @@ export function VerseByVersePanel({
   const selectedCount = selected.size
 
   const currentStep: Step = !hasEsv ? 'esv' : !hasNotes ? 'notes' : !hasInsights ? 'research' : 'outline'
+
+  // ── Word selection ───────────────────────────────────────────────────────────
+  function toggleWord(verseRef: string, word: string) {
+    setSelectedWords(prev => {
+      const current = prev[verseRef] ?? []
+      if (current.includes(word)) {
+        return { ...prev, [verseRef]: current.filter(w => w !== word) }
+      }
+      if (current.length >= 5) return prev  // max 5 per verse
+      return { ...prev, [verseRef]: [...current, word] }
+    })
+  }
+
+  function cleanWord(raw: string): string {
+    return raw.replace(/[^a-zA-Z'-]/g, '').toLowerCase()
+  }
 
   // ── Load ESV ────────────────────────────────────────────────────────────────
   async function handleFetchEsv() {
@@ -168,7 +187,7 @@ export function VerseByVersePanel({
   // ── Generate insights ─────────────────────────────────────────────────────────
   async function handleGenerate() {
     setGenerating(true); setGenError(null)
-    const result = await generateVerseInsightsAction(sessionId, churchId)
+    const result = await generateVerseInsightsAction(sessionId, churchId, selectedWords)
     if (result.error) { setGenError(result.error); setGenerating(false); return }
     // Reload from DB — AI saves before we display
     if (scriptureRef) {
@@ -396,8 +415,39 @@ export function VerseByVersePanel({
 
                 {/* ── Left: verse text + notes ────────────────────────── */}
                 <div className="p-5">
-                  {/* Verse text */}
-                  <p className="text-sm text-slate-800 leading-relaxed font-serif mb-4">{verse.text}</p>
+                  {/* Verse text — tap/click words to select for word study */}
+                  <div className="mb-4">
+                    <p className="text-[11px] font-medium text-slate-400 mb-1.5">
+                      {hasEsv && !hasInsights
+                        ? <>Tap words to request a word study <span className="text-slate-300">(up to 5)</span></>
+                        : selectedWords[verse.verse_ref]?.length
+                          ? <span className="text-violet-600">{selectedWords[verse.verse_ref].length} word{selectedWords[verse.verse_ref].length !== 1 ? 's' : ''} selected for study</span>
+                          : null}
+                    </p>
+                    <p className="text-sm text-slate-800 leading-relaxed font-serif">
+                      {verse.text.split(/\b/).map((token, i) => {
+                        const cleaned = cleanWord(token)
+                        if (!cleaned || cleaned.length < 3) return <span key={i}>{token}</span>
+                        const isSelected = (selectedWords[verse.verse_ref] ?? []).includes(cleaned)
+                        const maxed = (selectedWords[verse.verse_ref]?.length ?? 0) >= 5
+                        return (
+                          <span
+                            key={i}
+                            onClick={() => toggleWord(verse.verse_ref, cleaned)}
+                            className={`cursor-pointer rounded transition-all ${ 
+                              isSelected
+                                ? 'bg-violet-200 text-violet-900 font-semibold px-0.5'
+                                : maxed
+                                  ? 'opacity-50 cursor-default'
+                                  : 'hover:bg-violet-50 hover:text-violet-700'
+                            }`}
+                          >
+                            {token}
+                          </span>
+                        )
+                      })}
+                    </p>
+                  </div>
 
                   {/* Notes list */}
                   <div className="space-y-2">

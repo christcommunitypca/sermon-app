@@ -65,6 +65,7 @@ export async function updateSessionAction(formData: FormData) {
     title: (formData.get('title') as string).trim(),
     type: formData.get('type') as SessionType,
     scripture_ref: (formData.get('scripture_ref') as string)?.trim() || null,
+    scheduled_date: (formData.get('scheduled_date') as string)?.trim() || null,
     estimated_duration: formData.get('estimated_duration')
       ? parseInt(formData.get('estimated_duration') as string)
       : null,
@@ -81,7 +82,7 @@ export async function updateSessionAction(formData: FormData) {
 
   if (error) throw new Error(error.message)
 
-  revalidatePath(`/${churchSlug}/teaching/${sessionId}`)
+  redirect(`/${churchSlug}/teaching/${sessionId}`)
 }
 
 // ── Update session status ──────────────────────────────────────────────────────
@@ -219,3 +220,4 @@ export async function deleteSessionAction(
 
   redirect(`/${churchSlug}/teaching`)
 }
+

@@ -231,7 +231,8 @@ export async function incrementNoteUsageAction(
 
 export async function generateVerseInsightsAction(
   sessionId: string,
-  churchId: string
+  churchId: string,
+  selectedWords?: Record<string, string[]>   // verse_ref → words chosen by teacher
 ): Promise<{ error: string | null; count: number }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh.', count: 0 }
@@ -272,6 +273,7 @@ export async function generateVerseInsightsAction(
       sessionType: session.type,
       tradition,
       pastorNotes: notesContext,
+      selectedWords: selectedWords ?? {},
     })
 
     // Save ALL rows before returning — never show without persisting

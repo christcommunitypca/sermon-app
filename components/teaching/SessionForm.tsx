@@ -88,17 +88,27 @@ export function SessionForm({ churchId, churchSlug, session, flows = [], selecte
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Est. duration (min)</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Scheduled delivery date</label>
           <input
-            name="estimated_duration"
-            type="number"
-            min="1"
-            max="240"
-            defaultValue={session?.estimated_duration ?? ''}
-            placeholder="30"
+            name="scheduled_date"
+            type="date"
+            defaultValue={session?.scheduled_date ?? ''}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
           />
         </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Est. duration (min)</label>
+        <input
+          name="estimated_duration"
+          type="number"
+          min="1"
+          max="240"
+          defaultValue={session?.estimated_duration ?? ''}
+          placeholder="30"
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 w-40"
+        />
       </div>
 
       {!isEdit && flows.length > 0 && (

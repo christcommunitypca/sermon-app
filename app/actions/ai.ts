@@ -34,6 +34,9 @@ export async function generateOutlineAction(input: {
   sessionId: string
   churchId: string
   flowStructure: { type: string; label: string }[] | undefined
+  // Optional verse-study context passed from Verse by Verse mode
+  verseNotes?: Record<string, string>
+  selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
 }) {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' } as any
@@ -56,6 +59,8 @@ export async function generateOutlineAction(input: {
       thoughts: thoughts.map(t => ({ content: t.content ?? '' })),
       flowStructure: input.flowStructure,
       outlineId: outline.id,
+      verseNotes: input.verseNotes,
+      selectedInsights: input.selectedInsights,
     })
     return { blocks: result.blocks, model: result.model, error: null }
   } catch (err) {

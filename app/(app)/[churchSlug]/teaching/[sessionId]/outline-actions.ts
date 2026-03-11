@@ -71,25 +71,31 @@ export async function createManualSnapshotAction(
   outlineId: string,
   churchId: string,
   label: string,
-  blocks: OutlineBlock[]
+  // blocks are read from DB to avoid server action body size limits
 ): Promise<{ version?: number; error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
   try {
-    const { data: session } = await supabaseAdmin
-      .from('teaching_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .eq('teacher_id', user.id)
-      .single()
+    const [{ data: session }, { data: contentTags }, { data: dbBlocks }] = await Promise.all([
+      supabaseAdmin
+        .from('teaching_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .eq('teacher_id', user.id)
+        .single(),
+      supabaseAdmin
+        .from('content_tags')
+        .select('tag_id')
+        .eq('session_id', sessionId),
+      supabaseAdmin
+        .from('outline_blocks')
+        .select('*')
+        .eq('outline_id', outlineId)
+        .order('position'),
+    ])
 
     if (!session) return { error: 'Session not found' }
-
-    const { data: contentTags } = await supabaseAdmin
-      .from('content_tags')
-      .select('tag_id')
-      .eq('session_id', sessionId)
 
     const snapshotData: SessionSnapshotData = {
       title: session.title,
@@ -110,7 +116,7 @@ export async function createManualSnapshotAction(
       createdBy: user.id,
       label: label.trim() || null,
       sessionData: snapshotData,
-      blocks,
+      blocks: dbBlocks ?? [],
     })
 
     return { version }

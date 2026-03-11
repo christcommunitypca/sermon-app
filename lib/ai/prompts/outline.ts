@@ -19,6 +19,14 @@ export function buildPrompt(input: OutlineInput): PromptPayload {
     ? `Structure your outline using these sections in order: ${flowStructure.map(f => f.label).join(', ')}.`
     : 'Use a standard sermon structure: Introduction, Main Points, Application, Conclusion.'
 
+  const durationRule = session.estimatedDuration
+    ? `- CRITICAL: The total of all estimated_minutes values MUST sum to approximately ${session.estimatedDuration} minutes. Fit the outline to this target. Do not ignore this constraint.`
+    : ''
+
+  const durationUser = session.estimatedDuration
+    ? `Target delivery time: ${session.estimatedDuration} minutes — the outline MUST fit this time`
+    : 'Target delivery time: not specified'
+
   const system = `You are a sermon outline assistant for pastors. Generate a structured outline in JSON format.
 
 Rules:
@@ -32,18 +40,40 @@ Rules:
     - high = clear scriptural direction
     - medium = reasonable interpretation
     - low = suggestion needing pastor review
-- ${flowHint}`
+- ${flowHint}
+${durationRule}`
+
+  // Build verse notes section if provided
+  const verseNotesText = input.verseNotes
+    ? Object.entries(input.verseNotes)
+        .filter(([, note]) => note.trim())
+        .map(([ref, note]) => `[${ref}] ${note}`)
+        .join('\n')
+    : ''
+
+  // Build selected insights section if provided
+  const selectedInsightsText = input.selectedInsights?.length
+    ? input.selectedInsights
+        .map(i => `[${i.verseRef} / ${i.category}] ${i.title ? i.title + ': ' : ''}${i.content}`)
+        .join('\n')
+    : ''
 
   const user = `Create a preaching outline for:
 
 Title: ${session.title}
 Type: ${session.type}
 Scripture: ${session.scriptureRef ?? 'Not specified'}
-${session.estimatedDuration ? `Estimated duration: ${session.estimatedDuration} minutes` : ''}
+${durationUser}
 Notes: ${session.notes ?? 'None'}
 
 Thought captures / raw ideas from the pastor:
-${thoughtText}
+${thoughtText}${verseNotesText ? `
+
+Pastor's verse-by-verse study notes:
+${verseNotesText}` : ''}${selectedInsightsText ? `
+
+Research insights the pastor has selected to incorporate:
+${selectedInsightsText}` : ''}
 
 Return a JSON array of outline blocks only.`
 

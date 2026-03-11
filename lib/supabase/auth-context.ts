@@ -18,11 +18,7 @@ import type { User } from '@supabase/supabase-js'
 // Returns null (instead of redirecting) so the caller can return a typed
 // error to the client rather than triggering a hard navigation mid-flow.
 export async function getActionUser(): Promise<User | null> {
-  try {
-    const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    return session?.user ?? null
-  } catch {
-    return null
-  }
+  const supabase = await createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.user ?? null
 }

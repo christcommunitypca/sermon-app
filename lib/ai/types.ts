@@ -86,6 +86,9 @@ export interface OutlineInput {
   thoughts: { content: string }[]
   flowStructure?: { type: string; label: string }[]
   outlineId: string
+  // Optional verse-study context (from Verse by Verse mode)
+  verseNotes?: Record<string, string>
+  selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
 }
 
 export interface OutlineResult extends AIResultMeta {
@@ -151,4 +154,44 @@ export interface TagInput {
 
 export interface TagResult extends AIResultMeta {
   suggestions: string[]
+}
+
+// ── Verse Insights ────────────────────────────────────────────────────────────
+
+export interface VerseInsightInput {
+  verses: import('@/lib/esv').VerseData[]
+  sessionTitle: string
+  sessionType: string
+  tradition: string
+  pastorNotes?: Record<string, string[]>  // verse_ref → notes[], sent as context to AI
+}
+
+export interface InsightItem {
+  title: string
+  content: string
+}
+
+export interface RawVerseInsight {
+  verse_ref: string
+  category: string
+  items: InsightItem[]
+}
+
+export interface VerseInsightResult extends AIResultMeta {
+  insights: RawVerseInsight[]
+}
+
+// ── Lesson Summary ────────────────────────────────────────────────────────────
+
+export interface LessonSummaryInput {
+  outlineText: string
+  scriptureRef: string | null
+  tradition: string
+  targetMinutes: number | null
+}
+
+export interface LessonSummaryResult extends AIResultMeta {
+  estimated_minutes: number
+  key_theme: string
+  titles: string[]
 }

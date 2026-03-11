@@ -338,6 +338,10 @@ export interface SeriesSession {
   notes: string | null
   liturgical_note: string | null
   status: SeriesSessionStatus
+  week_type: 'normal' | 'skipped' | 'guest'
+  skip_reason: string | null
+  guest_name: string | null
+  guest_in_series: boolean
   created_at: string
 }
 
@@ -353,6 +357,19 @@ export type ResearchCategory =
   | 'current_topic'
 
 export type ResearchSourceType = 'ai_synthesis' | 'sourced' | 'user'
+
+export interface VerseNote {
+  id: string
+  session_id: string
+  church_id: string
+  teacher_id: string
+  verse_ref: string
+  content: string
+  position: number
+  used_count: number
+  created_at: string
+  updated_at: string
+}
 
 export interface ResearchItem {
   id: string

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getSeriesWithSessions } from '@/lib/series'
 import { ChevronLeft, BookOpen, Calendar, ExternalLink, Plus } from 'lucide-react'
-import { createSessionFromSeriesWeekAction } from '../actions'
+import { createSessionFromSeriesWeekAction, insertGapAfterWeekAction } from '../actions'
 import { SeriesWeekExpander } from '@/components/series/SeriesWeekExpander'
 
 interface Props { params: { churchSlug: string; seriesId: string } }
@@ -11,9 +11,9 @@ interface Props { params: { churchSlug: string; seriesId: string } }
 export default async function SeriesDetailPage({ params }: Props) {
   const { churchSlug, seriesId } = params
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/sign-in')
-  const user = session.user
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const data = await getSeriesWithSessions(seriesId, user.id)
   if (!data) return notFound()
@@ -22,6 +22,7 @@ export default async function SeriesDetailPage({ params }: Props) {
 
   async function createWeekSession(seriesSessionId: string): Promise<void> {
     'use server'
+    // createSessionFromSeriesWeekAction now calls redirect() internally
     await createSessionFromSeriesWeekAction(seriesSessionId, seriesId, '', churchSlug)
   }
 
@@ -123,6 +124,7 @@ export default async function SeriesDetailPage({ params }: Props) {
               linkedSession={linkedSession}
               weekDate={weekDate}
               churchSlug={churchSlug}
+              seriesId={seriesId}
               createWeekSession={createWeekSession}
             />
           )

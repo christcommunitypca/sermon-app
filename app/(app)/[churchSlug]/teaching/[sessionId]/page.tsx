@@ -3,13 +3,18 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
-import { OutlineEditor } from '@/components/teaching/OutlineEditor'
 import { SessionDetailActions } from '@/components/teaching/SessionDetailActions'
+import { TeachingWorkspace } from '@/components/teaching/TeachingWorkspace'
 import { SessionStatus } from '@/types/database'
 import { hasValidKey } from '@/lib/ai/key'
 import { getActiveProviderName } from '@/lib/ai/providers/resolver'
-import { ChevronLeft, Edit, Tag, Clock, FileText, Presentation, FlaskConical } from 'lucide-react'
+import { fetchPassage } from '@/lib/esv'
+import {
+  ChevronLeft, Edit, Tag, Clock, FileText,
+  Presentation, FlaskConical
+} from 'lucide-react'
 import { updateSessionStatusAction } from '../actions'
+import type { TeachingMode } from '@/components/teaching/TeachingWorkspace'
 
 interface Props { params: { churchSlug: string; sessionId: string } }
 
@@ -20,12 +25,14 @@ const STATUS_NEXT: Partial<Record<SessionStatus, { label: string; next: SessionS
 
 export default async function SessionDetailPage({ params }: Props) {
   const { churchSlug, sessionId } = params
+
   const supabase = await createClient()
   const { data: { session: authSession } } = await supabase.auth.getSession()
   if (!authSession) redirect('/sign-in')
   const user = authSession.user
 
-  const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
+  const { data: church } = await supabaseAdmin
+    .from('churches').select('id').eq('slug', churchSlug).single()
   if (!church) return notFound()
 
   const data = await getSessionWithOutline(sessionId, user.id)
@@ -48,17 +55,58 @@ export default async function SessionDetailPage({ params }: Props) {
   const nextStatus = STATUS_NEXT[session.status as SessionStatus]
   const isArchived = session.status === 'archived'
 
+  // Pre-load verse data server-side for fast initial render
+  let initialVerses = null
+  let initialInsights: Record<string, Record<string, { title: string; content: string }[]>> = {}
+  let initialVerseNotes: Record<string, import('@/types/database').VerseNote[]> = {}
+
+  if (session.scripture_ref) {
+    try {
+      initialVerses = await fetchPassage(session.scripture_ref)
+    } catch {
+      // ESV key not set or network issue — client handles gracefully
+    }
+
+    const [{ data: insightRows }, { data: noteRows }] = await Promise.all([
+      supabaseAdmin
+        .from('verse_insights')
+        .select('verse_ref, category, items')
+        .eq('session_id', sessionId)
+        .eq('teacher_id', user.id),
+      supabaseAdmin
+        .from('verse_notes')
+        .select('*')
+        .eq('session_id', sessionId)
+        .eq('teacher_id', user.id)
+        .order('verse_ref')
+        .order('position'),
+    ])
+
+    for (const row of insightRows ?? []) {
+      if (!initialInsights[row.verse_ref]) initialInsights[row.verse_ref] = {}
+      initialInsights[row.verse_ref][row.category] = row.items as { title: string; content: string }[]
+    }
+    for (const row of noteRows ?? []) {
+      if (!initialVerseNotes[row.verse_ref]) initialVerseNotes[row.verse_ref] = []
+      initialVerseNotes[row.verse_ref].push(row as import('@/types/database').VerseNote)
+    }
+  }
+
+  const initialMode: TeachingMode = (session as any).teaching_mode ?? 'verse_by_verse'
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Breadcrumb + actions */}
+    <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <Link href={`/${churchSlug}/teaching`} className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors">
+        <Link href={`/${churchSlug}/teaching`}
+          className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors">
           <ChevronLeft className="w-4 h-4" />Teaching
         </Link>
         <div className="flex items-center gap-2">
           {nextStatus && !isArchived && (
             <form action={updateSessionStatusAction.bind(null, sessionId, church.id, churchSlug, nextStatus.next)}>
-              <button type="submit" className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+              <button type="submit"
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
                 {nextStatus.label}
               </button>
             </form>
@@ -69,16 +117,10 @@ export default async function SessionDetailPage({ params }: Props) {
               <Presentation className="w-3.5 h-3.5" />Deliver
             </Link>
           )}
-          <SessionDetailActions
-            sessionId={sessionId}
-            churchId={church.id}
-            churchSlug={churchSlug}
-            isArchived={isArchived}
-          />
+          <SessionDetailActions sessionId={sessionId} churchId={church.id} churchSlug={churchSlug} isArchived={isArchived} />
         </div>
       </div>
 
-      {/* Archived banner */}
       {isArchived && (
         <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-600">
           <span>This session is archived.</span>
@@ -86,7 +128,7 @@ export default async function SessionDetailPage({ params }: Props) {
         </div>
       )}
 
-      {/* Session header */}
+      {/* Session info card */}
       <div className={`bg-white border rounded-2xl p-6 mb-6 ${isArchived ? 'border-stone-200 opacity-80' : 'border-slate-200'}`}>
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
@@ -95,7 +137,9 @@ export default async function SessionDetailPage({ params }: Props) {
               <span>{session.type.replace('_', ' ')}</span>
               {session.scripture_ref && <span>· {session.scripture_ref}</span>}
               {session.estimated_duration && (
-                <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{session.estimated_duration}m</span>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />{session.estimated_duration}m
+                </span>
               )}
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                 session.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
@@ -104,18 +148,17 @@ export default async function SessionDetailPage({ params }: Props) {
                 'bg-slate-100 text-slate-600'
               }`}>{session.status}</span>
             </div>
-            {session.notes && <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap">{session.notes}</p>}
+            {session.notes && (
+              <p className="mt-3 text-sm text-slate-600 leading-relaxed">{session.notes}</p>
+            )}
           </div>
           {!isArchived && (
             <Link href={`/${churchSlug}/teaching/${sessionId}/edit`}
-              className="shrink-0 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              title="Edit session details">
+              className="shrink-0 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
               <Edit className="w-4 h-4" />
             </Link>
           )}
         </div>
-
-        {/* Sub-nav */}
         <div className="flex items-center gap-1 mt-5 pt-4 border-t border-slate-100 overflow-x-auto">
           {[
             { href: `/${churchSlug}/teaching/${sessionId}/research`, label: 'Research', icon: FlaskConical },
@@ -131,17 +174,22 @@ export default async function SessionDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Outline editor */}
-      <div className={`bg-white border border-slate-200 rounded-2xl p-6 ${isArchived ? 'opacity-70 pointer-events-none' : ''}`}>
-        <h2 className="text-sm font-semibold text-slate-700 mb-4">Outline</h2>
-        <OutlineEditor
-          outlineId={outline.id}
+      {/* Teaching workspace */}
+      <div className={isArchived ? 'opacity-70 pointer-events-none' : ''}>
+        <TeachingWorkspace
           sessionId={sessionId}
           churchId={church.id}
           churchSlug={churchSlug}
+          outlineId={outline.id}
           initialBlocks={blocks}
           flowStructure={matchingFlow?.structure}
           hasValidAIKey={hasValidAIKey}
+          scriptureRef={session.scripture_ref ?? null}
+          initialMode={initialMode}
+          estimatedDuration={session.estimated_duration ?? null}
+          initialVerses={initialVerses}
+          initialInsights={initialInsights}
+          initialVerseNotes={initialVerseNotes}
         />
       </div>
     </div>

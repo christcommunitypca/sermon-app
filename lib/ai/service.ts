@@ -41,8 +41,11 @@ import * as OutlinePrompt  from '@/lib/ai/prompts/outline'
 import * as ResearchPrompt from '@/lib/ai/prompts/research'
 import * as SeriesPrompt   from '@/lib/ai/prompts/series'
 import * as TagsPrompt     from '@/lib/ai/prompts/tags'
+import * as VerseInsightsPrompt from '@/lib/ai/prompts/verse-insights'
+import * as LessonSummaryPrompt from '@/lib/ai/prompts/lesson-summary'
 
 import type { OutlineBlock, ResearchCategory, ProposedWeek } from '@/types/database'
+import type { VerseInsightInput, VerseInsightResult, RawVerseInsight, LessonSummaryInput, LessonSummaryResult, ProviderName } from '@/lib/ai/types'
 
 // ── Re-export types so callers only need one import ───────────────────────────
 export type {
@@ -125,6 +128,21 @@ export async function generateOutline(
     },
     ai_edited: false,
   }))
+
+  // Scale estimated_minutes to match target duration if AI ignored the constraint.
+  // Only scales if a target was given and the total is off by more than 15%.
+  if (input.session.estimatedDuration && blocks.length > 0) {
+    const target = input.session.estimatedDuration
+    const total = blocks.reduce((sum, b) => sum + (b.estimated_minutes ?? 0), 0)
+    if (total > 0 && Math.abs(total - target) / target > 0.15) {
+      const scale = target / total
+      blocks.forEach(b => {
+        if (b.estimated_minutes) {
+          b.estimated_minutes = Math.round(b.estimated_minutes * scale * 2) / 2 // round to 0.5
+        }
+      })
+    }
+  }
 
   const result: OutlineResult = {
     blocks,
@@ -294,3 +312,126 @@ export async function suggestTags(
   logTask('suggestTags', result)
   return result
 }
+
+// ── generateVerseInsights ──────────────────────────────────────────────────────
+// Runs 2 parallel AI calls covering 3 categories each.
+// Keeps each response well under the 8192-token output ceiling.
+// Cost target: ~$0.04 for a 9-verse passage on Sonnet.
+
+export async function generateVerseInsights(
+  userId: string,
+  input: VerseInsightInput
+): Promise<VerseInsightResult> {
+  const creds = await resolveCredentials(userId)
+  const provider = getProvider()
+
+  type RawBatchItem = {
+    verse_ref?: string
+    category?: string
+    items?: { title?: string; content?: string }[]
+  }
+
+  const batchResults = await Promise.allSettled(
+    VerseInsightsPrompt.CATEGORY_BATCHES.map(async (categories, batchIndex) => {
+      const prompt = VerseInsightsPrompt.buildBatchPrompt(input, categories)
+      const completion = await provider.complete(prompt, creds)
+
+      if (!Array.isArray(completion.parsed)) {
+        throw new AIError('malformed_response',
+          `Batch ${batchIndex + 1} (${categories.join(',')}) — expected JSON array`)
+      }
+
+      const rows: RawVerseInsight[] = (completion.parsed as RawBatchItem[])
+        .filter(item =>
+          item &&
+          typeof item.verse_ref === 'string' &&
+          typeof item.category === 'string' &&
+          Array.isArray(item.items)
+        )
+        .map(item => ({
+          verse_ref: item.verse_ref as string,
+          category: item.category as string,
+          items: (item.items ?? []).slice(0, 3).map(i => ({
+            title: i.title ?? '',
+            content: i.content ?? '',
+          })),
+        }))
+
+      return { rows, model: completion.model, provider: completion.provider, duration_ms: completion.duration_ms }
+    })
+  )
+
+  const allInsights: RawVerseInsight[] = []
+  let model = ''
+  let providerName: ProviderName = 'anthropic'
+  let totalDuration = 0
+
+  for (let i = 0; i < batchResults.length; i++) {
+    const r = batchResults[i]
+    if (r.status === 'fulfilled') {
+      allInsights.push(...r.value.rows)
+      model = r.value.model
+      providerName = r.value.provider
+      totalDuration = Math.max(totalDuration, r.value.duration_ms)
+    } else {
+      console.warn(
+        `[generateVerseInsights] batch ${i + 1} (${VerseInsightsPrompt.CATEGORY_BATCHES[i].join(',')}) failed:`,
+        r.reason
+      )
+    }
+  }
+
+  if (allInsights.length === 0) {
+    throw new AIError('generation_failed', 'All batches failed. Check your API key and try again.')
+  }
+
+  const result: VerseInsightResult = {
+    insights: allInsights,
+    model,
+    provider: providerName,
+    prompt_version: VerseInsightsPrompt.VERSION,
+    duration_ms: totalDuration,
+  }
+
+  logTask('generateVerseInsights', result)
+  return result
+}
+
+// ── generateLessonSummary ──────────────────────────────────────────────────────
+
+export async function generateLessonSummary(
+  userId: string,
+  input: LessonSummaryInput
+): Promise<LessonSummaryResult> {
+  const creds = await resolveCredentials(userId)
+  const provider = getProvider()
+  const prompt = LessonSummaryPrompt.buildPrompt(input)
+
+  const completion = await provider.complete(prompt, creds)
+
+  const raw = completion.parsed as {
+    estimated_minutes?: number
+    key_theme?: string
+    titles?: string[]
+  }
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new AIError('malformed_response', 'Expected JSON object for lesson summary.')
+  }
+
+  const result: LessonSummaryResult = {
+    estimated_minutes: typeof raw.estimated_minutes === 'number' ? raw.estimated_minutes : 0,
+    key_theme: raw.key_theme ?? '',
+    titles: Array.isArray(raw.titles) ? raw.titles.slice(0, 10) : [],
+    model: completion.model,
+    provider: completion.provider,
+    prompt_version: prompt.version,
+    duration_ms: completion.duration_ms,
+  }
+
+  logTask('generateLessonSummary', result)
+  return result
+}
+
+// Re-export copyable prompt builder for use in server actions
+export { buildCopyablePrompt } from '@/lib/ai/prompts/lesson-summary'

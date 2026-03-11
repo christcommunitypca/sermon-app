@@ -152,7 +152,7 @@ export function OutlineEditor({
   async function handleManualSnapshot() {
     setSavingSnapshot(true)
     const result = await createManualSnapshotAction(
-      sessionId, outlineId, churchId, snapshotLabel, blocks
+      sessionId, outlineId, churchId, snapshotLabel
     )
     setSavingSnapshot(false)
     if (!result.error) {

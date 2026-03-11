@@ -13,11 +13,15 @@ export async function createClient() {
           return cookieStore.getAll()
         },
         setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          // No try/catch: cookie writes must succeed in server actions and route handlers.
-          // Server components are read-only but they never call auth methods that write cookies.
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // Called from a server component — cookie writes are not allowed.
+            // Middleware has already written the refreshed token to the response.
+            // This catch is intentional and required — do not remove.
+          }
         },
       },
     }

@@ -4,9 +4,12 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Plus, Trash2, Clock, Save, Sparkles, RotateCcw, Check, X,
-  BookMarked, AlertCircle
+  BookMarked, AlertCircle, Bold, Italic, Loader2, BookOpen
 } from 'lucide-react'
 import { OutlineBlock, VerseNote } from '@/types/database'
+import type { PendingItem, StepState } from './TeachingWorkspace'
+import { StepIndicator } from './StepIndicator'
+import { incrementNoteUsedCountAction, incrementInsightUsedCountAction } from '@/app/actions/verse-study'
 import { AISourceBadge } from './AISourceBadge'
 import { OutlineReference } from './OutlineReference'
 import { LessonSummaryModal } from './LessonSummaryModal'
@@ -41,41 +44,70 @@ const BLOCK_BORDER_COLORS: Record<OutlineBlock['type'], string> = {
   transition: 'border-l-purple-300',
 }
 
-const MAX_DEPTH = 3
+const MAX_DEPTH = 4
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-type Insights = Record<string, Record<string, { title: string; content: string }[]>>
+type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 
 interface Props {
   outlineId: string
   sessionId: string
   churchId: string
   churchSlug: string
-  initialBlocks: OutlineBlock[]
+  blocks: OutlineBlock[]
+  onBlocksChange: (blocks: OutlineBlock[]) => void
   flowStructure?: { type: string; label: string }[]
   hasValidAIKey: boolean
   estimatedDuration: number | null
   initialInsights: Insights
   initialVerseNotes: Record<string, VerseNote[]>
+  onInsightsChange: (insights: Insights) => void
+  onSaveTrigger?:   (fn: () => void) => void
+  onAITrigger?:     (fn: () => void) => void
+  pending:          PendingItem | null
+  onItemPlaced:     (item: PendingItem) => void
+  onPendingFromRef: (item: PendingItem) => void
+  onCancelPending:  () => void
+  steps:            StepState[]
 }
 
 export function OutlinePanel({
   outlineId, sessionId, churchId, churchSlug,
-  initialBlocks, flowStructure, hasValidAIKey,
+  blocks, onBlocksChange, flowStructure, hasValidAIKey,
   estimatedDuration, initialInsights, initialVerseNotes,
+  onInsightsChange, onSaveTrigger, onAITrigger, pending, onItemPlaced, onPendingFromRef, onCancelPending, steps,
 }: Props) {
-  const [blocks, setBlocks] = useState<OutlineBlock[]>(initialBlocks)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [snapshotLabel, setSnapshotLabel] = useState('')
   const [showSnapshotInput, setShowSnapshotInput] = useState(false)
   const [savingSnapshot, setSavingSnapshot] = useState(false)
-  const [showSummary, setShowSummary] = useState(false)
+  const [showSummary,   setShowSummary]   = useState(false)
+  const [showAssist,    setShowAssist]    = useState(false)
+  const [showDraftModal, setShowDraftModal] = useState(false)
+  const assistRef = useRef<HTMLDivElement>(null)
+
+  // Register external trigger callbacks so workspace toolbar can fire these
+  useEffect(() => {
+    onSaveTrigger?.(() => setShowSnapshotInput(v => !v))
+    onAITrigger?.(() => setShowAssist(v => !v))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // AI state
   const [aiLoading, setAILoading] = useState(false)
-  const [aiProposed, setAIProposed] = useState<OutlineBlock[] | null>(null)
-  const [aiError, setAIError] = useState<string | null>(null)
+  const [aiProposed,   setAIProposed]   = useState<OutlineBlock[] | null>(null)
+  const [aiError,      setAIError]      = useState<string | null>(null)
+  const [hiddenVerses, setHiddenVerses] = useState<Set<string>>(new Set())
+
+  function toggleVerse(ref: string) {
+    setHiddenVerses(prev => { const n = new Set(prev); n.has(ref) ? n.delete(ref) : n.add(ref); return n })
+  }
+
+  const allVerseRefs = Array.from(new Set([
+    ...Object.keys(initialVerseNotes).filter(r => initialVerseNotes[r].some(n => n.content.trim())),
+    ...Object.keys(initialInsights),
+  ])).sort()
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const flatBlocks = getFlatRenderOrder(blocks)
@@ -102,7 +134,7 @@ export function OutlinePanel({
   }, [outlineId, sessionId, churchId])
 
   function update(newBlocks: OutlineBlock[]) {
-    setBlocks(newBlocks)
+    onBlocksChange(newBlocks)
     scheduleSave(newBlocks)
   }
 
@@ -139,7 +171,7 @@ export function OutlinePanel({
         return { ...b, position: b.position + 1 }
       return b
     })
-    const newBlock = createLocalBlock(outlineId, anchor.parent_id, 'point', anchor.position + 1)
+    const newBlock = createLocalBlock(outlineId, anchor.parent_id, anchor.type, anchor.position + 1)
     update(normalizePositions([...shifted, newBlock]))
   }
 
@@ -155,11 +187,70 @@ export function OutlinePanel({
     update(normalizePositions(blocks.filter((b: OutlineBlock) => !toRemove.has(b.id))))
   }
 
-  // Add block from reference panel
+  // Add block from reference panel (direct, no pending)
   function handleAddFromReference(block: OutlineBlock) {
     const topLevel = getSortedChildren(blocks, null) as OutlineBlock[]
     const positioned = { ...block, position: topLevel.length }
     update(normalizePositions([...blocks, positioned]))
+  }
+
+  // Place a pending item at a specific position in the flat render order
+  // afterBlockId = null means "insert at top", otherwise insert after that block
+  async function handleDropZone(afterBlockId: string | null) {
+    if (!pending) return
+    const newBlock = createLocalBlock(outlineId, null, pending.type, 0)
+    const filled   = { ...newBlock, content: pending.content }
+    let nextBlocks: OutlineBlock[]
+
+    if (afterBlockId === null) {
+      // Insert at top — shift everything down
+      nextBlocks = normalizePositions([
+        { ...filled, parent_id: null, position: 0 },
+        ...blocks,
+      ])
+    } else {
+      const flat = getFlatRenderOrder(blocks)
+      const afterIdx = flat.findIndex(b => b.id === afterBlockId)
+      const afterBlock = flat[afterIdx]
+      // Inherit parent from the block we're inserting after
+      const withParent = { ...filled, parent_id: afterBlock?.parent_id ?? null }
+      const inserted = [...blocks, withParent]
+      nextBlocks = normalizePositions(inserted)
+      // Move to right position using move operations
+      // Simpler: rebuild flat order and renumber positions
+      // Actually — insert into the flat list after afterIdx, then rebuild
+      const flatWithNew = [...flat.slice(0, afterIdx + 1), withParent, ...flat.slice(afterIdx + 1)]
+      // Rebuild position by traversal — use the flat order to assign positions
+      nextBlocks = flatWithNew.map((b, i) => ({ ...b, position: i }))
+    }
+
+    update(nextBlocks)
+
+    // Fire used_count increments in background
+    if (pending.sourceKind === 'note') {
+      incrementNoteUsedCountAction(pending.sourceId).catch(() => null)
+    } else {
+      // sourceId format: "${verseRef}-${category}-${index}"
+      // Split on last two dashes to get parts
+      const parts = pending.sourceId.match(/^(.+)-([^-]+)-(\d+)$/)
+      if (parts) {
+        const [, verseRef, category, idxStr] = parts
+        const idx = parseInt(idxStr, 10)
+        // Optimistic update in workspace insights
+        onInsightsChange({
+          ...initialInsights,
+          [verseRef]: {
+            ...(initialInsights[verseRef] ?? {}),
+            [category]: (initialInsights[verseRef]?.[category] ?? []).map((it, i) =>
+              i === idx ? { ...it, used_count: (it.used_count ?? 0) + 1 } : it
+            ),
+          },
+        })
+        incrementInsightUsedCountAction(sessionId, verseRef, category, idx).catch(() => null)
+      }
+    }
+
+    onItemPlaced(pending)
   }
 
   // ── Snapshot ─────────────────────────────────────────────────────────────────
@@ -174,11 +265,18 @@ export function OutlinePanel({
   }
 
   // ── AI generation ────────────────────────────────────────────────────────────
-  async function handleGenerateAI() {
+  async function handleGenerateAI(
+    selectedInsights?: { verseRef: string; category: string; title: string; content: string }[],
+    verseNotesForAI?: Record<string, string>
+  ) {
     setAILoading(true)
     setAIError(null)
     try {
-      const data = await generateOutlineAction({ sessionId, churchId, flowStructure })
+      const data = await generateOutlineAction({
+        sessionId, churchId, flowStructure,
+        selectedInsights,
+        verseNotes: verseNotesForAI,
+      })
       if (data.error || !data.blocks) {
         setAIError(data.error ?? 'Generation failed')
       } else {
@@ -198,97 +296,71 @@ export function OutlinePanel({
   }
 
   return (
+    <>
     <div className="flex gap-5 min-h-[600px]">
       {/* ── Left: Outline editor ─────────────────────────────────────────── */}
-      <div className="w-[56%] flex flex-col gap-3">
-        {/* Time bar */}
+      <div className="w-[50%] flex flex-col gap-3">
+        {/* Snapshot input — shown inline when triggered from workspace toolbar */}
+        {showSnapshotInput && (
+          <div className="flex items-center gap-1">
+            <input
+              value={snapshotLabel}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSnapshotLabel(e.target.value)}
+              placeholder="Version label…"
+              className="text-xs px-2 py-1 border border-slate-300 rounded-lg w-36 focus:outline-none focus:ring-1 focus:ring-slate-400"
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleManualSnapshot()}
+              autoFocus
+            />
+            <button onClick={handleManualSnapshot} disabled={savingSnapshot}
+              className="p-1.5 bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50">
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => setShowSnapshotInput(false)}
+              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* AI assist dropdown — triggered from workspace toolbar button */}
+        <div className="relative" ref={assistRef} style={{ height: 0 }}>
+          {showAssist && (
+            <AssistDropdown
+              hasBlocks={blocks.length > 0}
+              aiLoading={aiLoading}
+              onDraftOutline={() => { setShowAssist(false); setShowDraftModal(true) }}
+              onOutlineReview={() => { setShowAssist(false); setShowSummary(true) }}
+              onClose={() => setShowAssist(false)}
+            />
+          )}
+        </div>
+
+        {/* Save state indicator */}
+        {(saveState === 'saved' || saveState === 'saving' || saveState === 'error') && (
+          <SaveIndicator state={saveState} lastSaved={lastSaved} />
+        )}
+
+        {/* Time bar — shown below toolbar when target is set */}
         {targetMins > 0 && (
-          <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
-            <div className="flex items-center justify-between mb-2 text-xs">
-              <span className={`font-semibold ${overTarget ? 'text-red-600' : underTarget ? 'text-amber-600' : 'text-slate-600'}`}>
-                {totalMins} min{' '}
-                {overTarget && <span className="font-normal text-red-500">({totalMins - targetMins} over target)</span>}
-                {underTarget && <span className="font-normal text-amber-500">({targetMins - totalMins} under target)</span>}
-              </span>
-              <span className="text-slate-400">Target: {targetMins} min</span>
-            </div>
-            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${overTarget ? 'bg-red-400' : underTarget ? 'bg-amber-400' : 'bg-emerald-400'}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
+            <span className={`text-xs font-medium whitespace-nowrap ${overTarget ? 'text-red-600' : underTarget ? 'text-amber-600' : 'text-slate-500'}`}>
+              {totalMins}/{targetMins}m
+              {overTarget && <span className="font-normal"> over</span>}
+              {underTarget && <span className="font-normal"> under</span>}
+            </span>
           </div>
         )}
-
-        {/* Toolbar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            {totalMins > 0 && targetMins === 0 && (
-              <span className="text-xs text-slate-400 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" />{totalMins} min est.
-              </span>
-            )}
-            <SaveIndicator state={saveState} lastSaved={lastSaved} />
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Lesson summary */}
-            <button
-              onClick={() => setShowSummary(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              <BookMarked className="w-3.5 h-3.5" />
-              Lesson Summary
-            </button>
-
-            {/* Snapshot */}
-            {showSnapshotInput ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  value={snapshotLabel}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSnapshotLabel(e.target.value)}
-                  placeholder="Version label (optional)"
-                  className="text-xs px-2 py-1 border border-slate-300 rounded-lg w-44 focus:outline-none focus:ring-1 focus:ring-slate-400"
-                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleManualSnapshot()}
-                  autoFocus
-                />
-                <button
-                  onClick={handleManualSnapshot}
-                  disabled={savingSnapshot}
-                  className="p-1.5 bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setShowSnapshotInput(false)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowSnapshotInput(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                <Save className="w-3.5 h-3.5" />Save version
-              </button>
-            )}
-
-            {/* AI generate */}
-            {hasValidAIKey && (
-              <button
-                onClick={handleGenerateAI}
-                disabled={aiLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                {aiLoading ? 'Generating…' : 'Generate outline'}
-              </button>
-            )}
-          </div>
-        </div>
+        {totalMins > 0 && targetMins === 0 && (
+          <span className="text-xs text-slate-400 flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" />{totalMins} min est.
+          </span>
+        )}
 
         {/* AI error */}
         {aiError && (
@@ -310,37 +382,47 @@ export function OutlinePanel({
           />
         )}
 
-        {/* Block list */}
-        <div className="space-y-1">
+        {/* Block list — with drop zones when pending */}
+        <div className="space-y-0">
           {flatBlocks.length === 0 ? (
-            <EmptyOutline outlineId={outlineId} onAdd={b => update([b])} />
+            pending ? (
+              <DropZone afterBlockId={null} onDrop={handleDropZone} />
+            ) : (
+              <EmptyOutline outlineId={outlineId} onAdd={b => update([b])} />
+            )
           ) : (
-            flatBlocks.map(block => {
-              const depth = getDepth(blocks, block.id)
-              const siblings = getSortedChildren(blocks, block.parent_id) as OutlineBlock[]
-              const idx = siblings.findIndex(b => b.id === block.id)
-              return (
-                <BlockRow
-                  key={block.id}
-                  block={block}
-                  depth={depth}
-                  canMoveUp={idx > 0}
-                  canMoveDown={idx < siblings.length - 1}
-                  canPromote={!!block.parent_id}
-                  canDemote={idx > 0 && depth < MAX_DEPTH}
-                  onContentChange={handleContentChange}
-                  onTypeChange={handleTypeChange}
-                  onMinutesChange={handleMinutesChange}
-                  onMoveUp={() => handleMoveUp(block.id)}
-                  onMoveDown={() => handleMoveDown(block.id)}
-                  onPromote={() => handlePromote(block.id)}
-                  onDemote={() => handleDemote(block.id)}
-                  onAddBelow={() => handleAddBelow(block.id)}
-                  onAddSubPoint={() => handleAddSubPoint(block.id)}
-                  onDelete={() => handleDelete(block.id)}
-                />
-              )
-            })
+            <>
+              {pending && <DropZone afterBlockId={null} onDrop={handleDropZone} />}
+              {flatBlocks.map((block, i) => {
+                const depth = getDepth(blocks, block.id)
+                const siblings = getSortedChildren(blocks, block.parent_id) as OutlineBlock[]
+                const idx = siblings.findIndex(b => b.id === block.id)
+                return (
+                  <div key={block.id}>
+                    <BlockRow
+                      block={block}
+                      depth={depth}
+                      canMoveUp={idx > 0}
+                      canMoveDown={idx < siblings.length - 1}
+                      canPromote={!!block.parent_id}
+                      canDemote={idx > 0 && depth < MAX_DEPTH}
+                      onContentChange={handleContentChange}
+                      onTypeChange={handleTypeChange}
+                      onMinutesChange={handleMinutesChange}
+                      onMoveUp={() => handleMoveUp(block.id)}
+                      onMoveDown={() => handleMoveDown(block.id)}
+                      onPromote={() => handlePromote(block.id)}
+                      onDemote={() => handleDemote(block.id)}
+                      onAddBelow={() => handleAddBelow(block.id)}
+                      onAddSubPoint={() => handleAddSubPoint(block.id)}
+                      onDelete={() => handleDelete(block.id)}
+                      dimmed={!!pending}
+                    />
+                    {pending && <DropZone afterBlockId={block.id} onDrop={handleDropZone} />}
+                  </div>
+                )
+              })}
+            </>
           )}
         </div>
 
@@ -359,13 +441,17 @@ export function OutlinePanel({
       </div>
 
       {/* ── Right: Reference panel ───────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
-        <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-3">Reference</p>
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0">
         <OutlineReference
-          outlineId={outlineId}
           insights={initialInsights}
           verseNotes={initialVerseNotes}
-          onAddToOutline={handleAddFromReference}
+          hiddenVerses={hiddenVerses}
+          allVerseRefs={allVerseRefs}
+          onToggleVerse={toggleVerse}
+          sessionId={sessionId}
+          pendingItemId={pending?.sourceId ?? null}
+          onPendingItem={onPendingFromRef}
+          onInsightsChange={onInsightsChange}
         />
       </div>
 
@@ -377,11 +463,70 @@ export function OutlinePanel({
           onClose={() => setShowSummary(false)}
         />
       )}
+
+      {showDraftModal && (
+        <DraftOutlineModal
+          insights={initialInsights}
+          verseNotes={initialVerseNotes}
+          aiLoading={aiLoading}
+          hasBlocks={blocks.length > 0}
+          onGenerate={(selectedInsights) => {
+            setShowDraftModal(false)
+            // Bundle notes for AI
+            const notesForAI: Record<string, string> = {}
+            for (const [vRef, notes] of Object.entries(initialVerseNotes)) {
+              const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+              if (text) notesForAI[vRef] = text
+            }
+            handleGenerateAI(selectedInsights, notesForAI)
+          }}
+          onClose={() => setShowDraftModal(false)}
+        />
+      )}
     </div>
+    </>
   )
 }
 
 // ── BlockRow ───────────────────────────────────────────────────────────────────
+
+
+// ── Inline formatting helpers ─────────────────────────────────────────────────
+function wrapSelection(
+  textarea: HTMLTextAreaElement,
+  marker: string,
+  onChange: (val: string) => void
+) {
+  const start = textarea.selectionStart
+  const end   = textarea.selectionEnd
+  if (start === end) return  // nothing selected
+  const val     = textarea.value
+  const before  = val.slice(0, start)
+  const sel     = val.slice(start, end)
+  const after   = val.slice(end)
+  const wrapped = `${marker}${sel}${marker}`
+  const next    = before + wrapped + after
+  onChange(next)
+  // Restore selection after React re-render
+  requestAnimationFrame(() => {
+    textarea.selectionStart = start
+    textarea.selectionEnd   = end + marker.length * 2
+    textarea.focus()
+  })
+}
+
+// Render inline **bold** and _italic_ markers as HTML for delivery/preview
+export function renderInlineMarkup(text: string): React.ReactNode {
+  // Split on **...** and _..._
+  const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**'))
+      return <strong key={i}>{part.slice(2, -2)}</strong>
+    if (part.startsWith('_') && part.endsWith('_'))
+      return <em key={i}>{part.slice(1, -1)}</em>
+    return part
+  })
+}
 
 interface BlockRowProps {
   key?: string  // React key, not used in component but accepted by TS
@@ -401,14 +546,15 @@ interface BlockRowProps {
   onAddBelow: () => void
   onAddSubPoint: () => void
   onDelete: () => void
+  dimmed?: boolean
 }
 
 function BlockRow({
-  block, depth, canMoveUp, canMoveDown, canPromote, canDemote,
+  block, depth, dimmed = false, canMoveUp, canMoveDown, canPromote, canDemote,
   onContentChange, onTypeChange, onMinutesChange,
   onMoveUp, onMoveDown, onPromote, onDemote, onAddBelow, onAddSubPoint, onDelete
 }: BlockRowProps) {
-  const [showControls, setShowControls] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
   const [showMinutes, setShowMinutes] = useState(!!block.estimated_minutes)
   const isSection = BLOCK_IS_SECTION(block.type) && depth === 0
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -430,14 +576,12 @@ function BlockRow({
           ? 'bg-slate-50 border-slate-200 py-3 mt-2'
           : 'bg-white border-slate-100 py-2'
         }
+        ${dimmed ? 'opacity-40 pointer-events-none select-none' : ''}
       `}
-      style={{ marginLeft: `${depth * 24}px` }}
-      onFocus={() => setShowControls(true)}
-      onBlur={(e: React.FocusEvent<HTMLDivElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setShowControls(false) }}
-      onMouseEnter={() => setShowControls(true)}
-      onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { if (!e.currentTarget.contains(document.activeElement)) setShowControls(false) }}
+      style={{ marginLeft: `${depth * 20}px` }}
+
     >
-      {/* Type selector */}
+      {/* Type selector — shows Sub-N label for sub_points based on depth */}
       <select
         value={block.type}
         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onTypeChange(block.id, e.target.value as OutlineBlock['type'])}
@@ -447,27 +591,70 @@ function BlockRow({
           <option key={val} value={val}>{label}</option>
         ))}
       </select>
+      {block.type === 'sub_point' && depth > 0 && (
+        <span className="text-[10px] text-slate-300 -ml-1 mr-1 shrink-0">Sub-{depth}</span>
+      )}
 
       {/* Content */}
       <div className="flex-1 min-w-0">
+        {/* Bold/italic mini-toolbar — appears on focus */}
+        <div className="flex gap-0.5 mb-1">
+            <button
+              type="button"
+              onMouseDown={(e: React.MouseEvent) => {
+                e.preventDefault()
+                if (textareaRef.current) wrapSelection(textareaRef.current, '**', (val) => onContentChange(block.id, val))
+              }}
+              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              title="Bold (select text first)"
+            ><Bold className="w-3 h-3" /></button>
+            <button
+              type="button"
+              onMouseDown={(e: React.MouseEvent) => {
+                e.preventDefault()
+                if (textareaRef.current) wrapSelection(textareaRef.current, '_', (val) => onContentChange(block.id, val))
+              }}
+              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              title="Italic (select text first)"
+            ><Italic className="w-3 h-3" /></button>
+        </div>
+        <div className="relative">
         <textarea
           ref={textareaRef}
           value={block.content}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onContentChange(block.id, e.target.value)}
-          placeholder={`Add ${BLOCK_TYPE_LABELS[block.type].toLowerCase()}…`}
           className={`w-full bg-transparent border-none focus:outline-none resize-none leading-relaxed placeholder:text-slate-300
-            ${isSection
-              ? 'text-lg font-bold text-slate-900'
-              : 'text-sm text-slate-800'
-            }
+            ${isSection ? 'text-lg font-bold text-slate-900' : 'text-sm text-slate-800'}
+            ${isFocused ? '' : 'caret-transparent select-none text-transparent'}
           `}
           rows={1}
+          placeholder={`Add ${BLOCK_TYPE_LABELS[block.type].toLowerCase()}…`}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            const mod = e.metaKey || e.ctrlKey
+            if (mod && e.key === 'b') { e.preventDefault(); wrapSelection(e.currentTarget, '**', (val) => onContentChange(block.id, val)) }
+            if (mod && e.key === 'i') { e.preventDefault(); wrapSelection(e.currentTarget, '_',  (val) => onContentChange(block.id, val)) }
+          }}
           onInput={(e: React.FormEvent<HTMLTextAreaElement>) => {
             const el = e.target as HTMLTextAreaElement
             el.style.height = 'auto'
             el.style.height = `${el.scrollHeight}px`
           }}
         />
+        {/* Formatted preview overlay — hidden when textarea is focused */}
+        {!isFocused && block.content && (
+          <div
+            onClick={() => textareaRef.current?.focus()}
+            className={`absolute inset-0 pointer-events-none leading-relaxed px-0 py-0 ${
+              isSection ? 'text-lg font-bold text-slate-900' : 'text-sm text-slate-800'
+            }`}
+            style={{ paddingTop: isSection ? '12px' : '8px', paddingLeft: '0px' }}
+          >
+            {renderInlineMarkup(block.content)}
+          </div>
+        )}
+        </div>
         <div className="flex items-center gap-2 mt-0.5">
           <AISourceBadge aiSource={block.ai_source} aiEdited={block.ai_edited} />
           {showMinutes && (
@@ -487,7 +674,7 @@ function BlockRow({
       </div>
 
       {/* Controls */}
-      <div className={`shrink-0 flex flex-col gap-0.5 transition-opacity ${showControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+      <div className="shrink-0 flex flex-col gap-0.5">
         <div className="flex gap-0.5">
           <IconBtn onClick={onMoveUp} disabled={!canMoveUp} title="Move up"><ChevronUp className="w-3.5 h-3.5" /></IconBtn>
           <IconBtn onClick={onMoveDown} disabled={!canMoveDown} title="Move down"><ChevronDown className="w-3.5 h-3.5" /></IconBtn>
@@ -575,5 +762,216 @@ function AIProposalBanner({ blocks, onAccept, onDiscard }: {
         ))}
       </div>
     </div>
+  )
+}
+
+
+// ── Assistance dropdown ────────────────────────────────────────────────────────
+function AssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview, onClose }: {
+  hasBlocks:     boolean
+  aiLoading:     boolean
+  onDraftOutline:  () => void
+  onOutlineReview: () => void
+  onClose:       () => void
+}) {
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node
+      const menu = document.getElementById('assist-menu')
+      if (menu && !menu.contains(target)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  return (
+    <div id="assist-menu" className="absolute right-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-30 overflow-hidden">
+      <div className="p-1.5 space-y-0.5">
+        <DropdownItem
+          icon={<Sparkles className="w-3.5 h-3.5" />}
+          label={hasBlocks ? 'Redraft AI Outline' : 'AI Outline'}
+          sublabel="AI builds an outline from your research & notes"
+          disabled={aiLoading}
+          onClick={onDraftOutline}
+        />
+        <div className="h-px bg-slate-100 my-1" />
+        <DropdownItem
+          icon={<BookMarked className="w-3.5 h-3.5" />}
+          label="Review Outline"
+          sublabel="AI reviews lesson flow, language & structure"
+          onClick={onOutlineReview}
+          disabled={!hasBlocks}
+        />
+      </div>
+    </div>
+  )
+}
+
+function DropdownItem({ icon, label, sublabel, onClick, disabled }: {
+  icon: React.ReactNode
+  label: string
+  sublabel: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+    >
+      <span className="mt-0.5 text-violet-500 shrink-0">{icon}</span>
+      <div>
+        <p className="text-xs font-semibold text-slate-800">{label}</p>
+        <p className="text-[11px] text-slate-400 leading-snug">{sublabel}</p>
+      </div>
+    </button>
+  )
+}
+
+// ── Draft Outline Modal — pick which research items to include ─────────────────
+function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGenerate, onClose }: {
+  insights:    Insights
+  verseNotes:  Record<string, import('@/types/database').VerseNote[]>
+  aiLoading:   boolean
+  hasBlocks:   boolean
+  onGenerate:  (selected: { verseRef: string; category: string; title: string; content: string }[]) => void
+  onClose:     () => void
+}) {
+  // Build flat list of all research items
+  const allItems = Object.entries(insights).flatMap(([vRef, cats]) =>
+    Object.entries(cats).flatMap(([cat, items]) =>
+      items.map((item, i) => ({ vRef, cat, item, key: `${vRef}||${cat}||${i}` }))
+    )
+  )
+  const [selected, setSelected] = useState<Set<string>>(new Set(allItems.map(a => a.key)))
+
+  function toggle(key: string) {
+    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+  function selectAll()  { setSelected(new Set(allItems.map(a => a.key))) }
+  function clearAll()   { setSelected(new Set()) }
+
+  function handleGenerate() {
+    const selectedItems = allItems
+      .filter(a => selected.has(a.key))
+      .map(a => ({ verseRef: a.vRef, category: a.cat, ...a.item }))
+    onGenerate(selectedItems)
+  }
+
+  const CAT_LABEL: Record<string, string> = {
+    word_study: 'Word Study', cross_refs: 'Cross-refs', context: 'Context',
+    practical: 'Practical', theology_by_tradition: 'Tradition', application: 'Application', quotes: 'Quotes',
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">{hasBlocks ? "Redraft AI Outline" : "AI Outline"}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Choose which research to include</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Notes summary */}
+        <div className="px-6 pt-3 pb-0">
+          <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+            <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+            All your verse notes are always included automatically
+          </div>
+        </div>
+
+        {/* Research selection */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {allItems.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">No research yet — the outline will be built from your notes alone.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Research Items ({selected.size}/{allItems.length})</p>
+                <div className="flex gap-2">
+                  <button onClick={selectAll} className="text-xs text-violet-600 hover:text-violet-800 font-medium">All</button>
+                  <span className="text-slate-300">·</span>
+                  <button onClick={clearAll} className="text-xs text-slate-400 hover:text-slate-600 font-medium">None</button>
+                </div>
+              </div>
+              {Object.entries(insights).map(([vRef, cats]) => (
+                <div key={vRef}>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">{vRef}</p>
+                  {Object.entries(cats).map(([cat, items]) =>
+                    items.map((item, i) => {
+                      const key = `${vRef}||${cat}||${i}`
+                      const isSelected = selected.has(key)
+                      return (
+                        <div key={key} onClick={() => toggle(key)}
+                          className={`flex items-start gap-3 p-2.5 mb-1.5 rounded-xl border cursor-pointer transition-all ${
+                            isSelected ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-transparent hover:border-slate-200'
+                          }`}>
+                          <span className={`mt-0.5 shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center ${
+                            isSelected ? 'bg-violet-600 border-violet-600' : 'border-slate-300 bg-white'
+                          }`}>
+                            {isSelected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mr-2">{CAT_LABEL[cat] ?? cat}</span>
+                            {item.title && <span className="text-xs font-semibold text-slate-700 mr-1">{item.title} —</span>}
+                            <span className="text-xs text-slate-600">{item.content.slice(0, 80)}{item.content.length > 80 ? '…' : ''}</span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleGenerate}
+            disabled={aiLoading}
+            className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          >
+            {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {aiLoading ? 'Drafting…' : 'Draft Outline'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Drop zone — shown between blocks when a pending item is active ─────────────
+function DropZone({ afterBlockId, onDrop }: {
+  afterBlockId: string | null
+  onDrop: (afterBlockId: string | null) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onClick={() => onDrop(afterBlockId)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`w-full h-6 flex items-center justify-center transition-all rounded-lg my-0.5
+        ${hovered
+          ? 'bg-violet-100 border-2 border-violet-400 border-dashed'
+          : 'border-2 border-transparent border-dashed hover:border-violet-300'
+        }`}
+    >
+      {hovered && (
+        <span className="text-xs font-semibold text-violet-600">Place here</span>
+      )}
+    </button>
   )
 }

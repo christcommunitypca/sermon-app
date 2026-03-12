@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getSeriesWithSessions } from '@/lib/series'
 import { ChevronLeft, BookOpen, Calendar, Plus } from 'lucide-react'
 import { createSessionFromSeriesWeekAction } from '../actions'
+import { backfillScheduledDateAction } from '../../teaching/actions'
 import { SeriesWeekExpander } from '@/components/series/SeriesWeekExpander'
 
 interface Props { params: { churchSlug: string; seriesId: string } }
@@ -19,6 +20,20 @@ export default async function SeriesDetailPage({ params }: Props) {
   if (!data) return notFound()
 
   const { series, sessions } = data
+
+  // Backfill scheduled_date for any linked sessions that are missing it
+  // This handles old data created before scheduled_date was tracked
+  for (const ss of sessions) {
+    const linked = (ss as any).teaching_sessions
+    if (linked && !linked.scheduled_date && series.start_date) {
+      const d = new Date(series.start_date + 'T00:00:00')
+      d.setDate(d.getDate() + (ss.week_number - 1) * 7)
+      const isoDate = d.toISOString().split('T')[0]
+      await backfillScheduledDateAction(ss.session_id!, isoDate)
+      // Patch local data so conflict detection sees the correct date this render
+      linked.scheduled_date = isoDate
+    }
+  }
 
   async function createWeekSession(seriesSessionId: string): Promise<void> {
     'use server'

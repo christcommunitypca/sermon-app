@@ -25,6 +25,21 @@ export default async function EditSessionPage({ params }: Props) {
     .single()
   if (!session) return notFound()
 
+  // Check if this session belongs to a series — if so, date is locked to series
+  const { data: seriesLink } = await supabaseAdmin
+    .from('series_sessions')
+    .select('series_id, week_number, series(id, title)')
+    .eq('session_id', sessionId)
+    .maybeSingle()
+
+  const seriesContext = seriesLink
+    ? {
+        seriesId:    (seriesLink.series as any)?.id as string,
+        seriesTitle: (seriesLink.series as any)?.title as string,
+        weekNumber:  seriesLink.week_number,
+      }
+    : null
+
   const { data: flows } = await supabaseAdmin.from('flows').select('*').eq('church_id', church.id).eq('teacher_id', user.id).order('name')
 
   return (
@@ -34,7 +49,7 @@ export default async function EditSessionPage({ params }: Props) {
       </Link>
       <h1 className="text-2xl font-bold text-slate-900 mb-8">Edit session</h1>
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <SessionForm churchId={church.id} churchSlug={churchSlug} session={session} flows={flows ?? []} />
+        <SessionForm churchId={church.id} churchSlug={churchSlug} session={session} flows={flows ?? []} seriesContext={seriesContext} />
       </div>
     </div>
   )

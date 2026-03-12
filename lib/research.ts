@@ -22,9 +22,19 @@ export async function saveResearchItems(
   churchId: string,
   teacherId: string,
   category: ResearchCategory,
-  items: Omit<ResearchItem, 'id' | 'session_id' | 'church_id' | 'teacher_id' | 'created_at'>[]
+  items: Omit<ResearchItem, 'id' | 'session_id' | 'church_id' | 'teacher_id' | 'used_count' | 'created_at'>[]
 ): Promise<ResearchItem[]> {
   if (!items.length) return []
+
+  // Delete existing un-placed items for this session+category before inserting new ones.
+  // Items with used_count > 0 are preserved — they've been placed in the outline.
+  await supabaseAdmin
+    .from('research_items')
+    .delete()
+    .eq('session_id', sessionId)
+    .eq('teacher_id', teacherId)
+    .eq('category', category)
+    .eq('used_count', 0)
 
   const toInsert = items.map(item => ({
     session_id: sessionId,

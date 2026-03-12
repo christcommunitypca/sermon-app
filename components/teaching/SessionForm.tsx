@@ -16,15 +16,22 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string; desc: string }[] =
   { value: 'church', label: 'Church', desc: 'All church members' },
 ]
 
+interface SeriesContext {
+  seriesId: string
+  seriesTitle: string
+  weekNumber: number
+}
+
 interface Props {
   churchId: string
   churchSlug: string
   session?: TeachingSession
   flows?: Flow[]
   selectedFlowId?: string
+  seriesContext?: SeriesContext | null
 }
 
-export function SessionForm({ churchId, churchSlug, session, flows = [], selectedFlowId }: Props) {
+export function SessionForm({ churchId, churchSlug, session, flows = [], selectedFlowId, seriesContext }: Props) {
   const isEdit = !!session
   const action = isEdit ? updateSessionAction : createSessionAction
 
@@ -89,12 +96,28 @@ export function SessionForm({ churchId, churchSlug, session, flows = [], selecte
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Scheduled delivery date</label>
-          <input
-            name="scheduled_date"
-            type="date"
-            defaultValue={session?.scheduled_date ?? ''}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-          />
+          {seriesContext ? (
+            <div className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm text-slate-500">
+              {session?.scheduled_date
+                ? new Date(session.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+                : 'Set by series'}
+              <p className="text-xs text-slate-400 mt-0.5">
+                Managed in{' '}
+                <a href={`/${churchSlug}/series/${seriesContext.seriesId}`}
+                  className="text-violet-600 hover:underline">
+                  {seriesContext.seriesTitle}
+                </a>
+                {' '}· Week {seriesContext.weekNumber}
+              </p>
+            </div>
+          ) : (
+            <input
+              name="scheduled_date"
+              type="date"
+              defaultValue={session?.scheduled_date ?? ''}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            />
+          )}
         </div>
       </div>
 

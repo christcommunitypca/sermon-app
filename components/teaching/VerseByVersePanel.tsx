@@ -3,37 +3,35 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Sparkles, BookOpen, AlertCircle, Loader2, ChevronDown, ChevronUp,
-  Check, ArrowRight, Plus, Trash2, GripVertical, ArrowUp, ArrowDown,
+  Check, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, MessageSquare,
 } from 'lucide-react'
 import {
   fetchVerseDataAction,
   generateVerseInsightsAction,
+  toggleInsightFlagAction,
   createVerseNoteAction,
   updateVerseNoteAction,
   deleteVerseNoteAction,
   reorderVerseNotesAction,
 } from '@/app/actions/verse-study'
-import { generateOutlineAction } from '@/app/actions/ai'
 import type { VerseData } from '@/lib/esv'
+import { StepIndicator } from './StepIndicator'
+import type { StepState } from './TeachingWorkspace'
 import type { OutlineBlock, VerseNote } from '@/types/database'
+import type { PendingItem } from './TeachingWorkspace'
 
 const CATEGORIES = [
   { key: 'word_study',            label: 'Word Study' },
   { key: 'cross_refs',            label: 'Cross-refs' },
   { key: 'context',               label: 'Context' },
-  { key: 'practical',             label: 'Practical' },
+  { key: 'practical',             label: 'Analogies' },
   { key: 'theology_by_tradition', label: 'Tradition' },
   { key: 'application',           label: 'Application' },
+  { key: 'quotes',                  label: 'Quotes' },
 ] as const
 
 type CategoryKey = typeof CATEGORIES[number]['key']
-type Insights = Record<string, Record<string, { title: string; content: string }[]>>
-type SelectedKey = string // "verseRef||category||index"
-
-function makeKey(verseRef: string, cat: string, idx: number): SelectedKey {
-  return `${verseRef}||${cat}||${idx}`
-}
-
+type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 interface Props {
@@ -51,18 +49,18 @@ interface Props {
   onInsightsChange:   (i: Insights) => void
   onVerseNotesChange: (n: Record<string, VerseNote[]>) => void
   onOutlineGenerated: (blocks: OutlineBlock[]) => void
+  onPendingItem:      (item: PendingItem) => void
+  pendingItemId:      string | null
+  steps:              StepState[]
 }
-
-type Step = 'esv' | 'notes' | 'research' | 'outline'
 
 export function VerseByVersePanel({
   sessionId, churchId, scriptureRef, hasValidAIKey,
   flowStructure, estimatedDuration,
   verses, insights, verseNotes,
   onVersesChange, onInsightsChange, onVerseNotesChange,
-  onOutlineGenerated,
+  onOutlineGenerated, onPendingItem, pendingItemId, steps,
 }: Props) {
-  const [selected,       setSelected]       = useState<Set<SelectedKey>>(new Set())
   const [activeCategory, setActiveCategory] = useState<Record<string, CategoryKey>>({})
   const [collapsed,      setCollapsed]      = useState<Set<string>>(new Set())
 
@@ -70,8 +68,6 @@ export function VerseByVersePanel({
   const [fetchError,   setFetchError]   = useState<string | null>(null)
   const [generating,   setGenerating]   = useState(false)
   const [genError,     setGenError]     = useState<string | null>(null)
-  const [genOutline,   setGenOutline]   = useState(false)
-  const [outlineError, setOutlineError] = useState<string | null>(null)
 
   // Per-note save state: noteId → SaveState
   const [noteSaveStates, setNoteSaveStates] = useState<Record<string, SaveState>>({})
@@ -88,13 +84,6 @@ export function VerseByVersePanel({
   const hasEsv      = !!verses?.length
   const hasInsights = Object.keys(insights).length > 0
   const hasNotes    = Object.values(verseNotes).some(arr => arr.length > 0)
-  const totalItems  = Object.values(insights).reduce(
-    (acc, cats) => acc + Object.values(cats).reduce((a, items) => a + items.length, 0), 0
-  )
-  const selectedCount = selected.size
-
-  const currentStep: Step = !hasEsv ? 'esv' : !hasNotes ? 'notes' : !hasInsights ? 'research' : 'outline'
-
   // ── Word selection ───────────────────────────────────────────────────────────
   function toggleWord(verseRef: string, word: string) {
     setSelectedWords(prev => {
@@ -201,45 +190,7 @@ export function VerseByVersePanel({
     setGenerating(false)
   }
 
-  // ── Selection ─────────────────────────────────────────────────────────────────
-  function toggleItem(key: SelectedKey) {
-    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
-  }
-  function selectAll() {
-    const keys: SelectedKey[] = []
-    for (const [vRef, cats] of Object.entries(insights))
-      for (const [cat, items] of Object.entries(cats))
-        items.forEach((_, i) => keys.push(makeKey(vRef, cat, i)))
-    setSelected(new Set(keys))
-  }
-  function clearAll() { setSelected(new Set()) }
-
-  // ── Generate outline ──────────────────────────────────────────────────────────
-  async function handleGenerateOutline() {
-    setGenOutline(true); setOutlineError(null)
-    const selectedInsights: { verseRef: string; category: string; title: string; content: string }[] = []
-    Array.from(selected).forEach(key => {
-      const [vRef, cat, idxStr] = key.split('||')
-      const item = insights[vRef]?.[cat]?.[parseInt(idxStr)]
-      if (item) selectedInsights.push({ verseRef: vRef, category: cat, ...item })
-    })
-
-    // Bundle notes per verse for AI context
-    const notesForAI: Record<string, string> = {}
-    for (const [vRef, notes] of Object.entries(verseNotes)) {
-      const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
-      if (text) notesForAI[vRef] = text
-    }
-
-    const result = await generateOutlineAction({
-      sessionId, churchId, flowStructure,
-      verseNotes: notesForAI,
-      selectedInsights,
-    })
-    setGenOutline(false)
-    if (result.error || !result.blocks) { setOutlineError(result.error ?? 'Outline generation failed.'); return }
-    onOutlineGenerated(result.blocks)
-  }
+  // (Generate outline moved to Outline view → Assistance → Draft Outline)
 
   function toggleCollapse(ref: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(ref) ? n.delete(ref) : n.add(ref); return n })
@@ -259,32 +210,6 @@ export function VerseByVersePanel({
 
       {/* ── Sticky workflow header ─────────────────────────────────────────────── */}
       <div className="sticky top-0 z-20 bg-slate-50 pb-4 pt-1">
-        {/* Step indicators */}
-        <div className="flex items-center gap-0 mb-3 flex-wrap gap-y-1">
-          {([
-            { key: 'esv',      label: '1  Load Text',          done: hasEsv },
-            { key: 'notes',    label: '2  Add Notes',           done: hasNotes },
-            { key: 'research', label: '3  Generate Research',   done: hasInsights },
-            { key: 'outline',  label: '4  Generate Outline',    done: false },
-          ] as { key: Step; label: string; done: boolean }[]).map((s, i, arr) => (
-            <div key={s.key} className="flex items-center">
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                s.done
-                  ? 'text-emerald-700 bg-emerald-50'
-                  : currentStep === s.key
-                    ? 'text-slate-900 bg-white border border-slate-200 shadow-sm'
-                    : 'text-slate-400'
-              }`}>
-                {s.done
-                  ? <Check className="w-3 h-3 text-emerald-600" strokeWidth={2.5} />
-                  : <span className={`w-3 h-3 rounded-full border-2 ${currentStep === s.key ? 'border-slate-700' : 'border-slate-300'}`} />
-                }
-                {s.label}
-              </div>
-              {i < arr.length - 1 && <div className="w-4 h-px bg-slate-200 mx-0.5" />}
-            </div>
-          ))}
-        </div>
 
         {/* Action bar */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -298,44 +223,18 @@ export function VerseByVersePanel({
               </button>
             )}
 
-            {/* Step 3: Generate research (only after notes) */}
-            {hasEsv && hasNotes && hasValidAIKey && (
-              <button onClick={handleGenerate} disabled={generating}
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-40 transition-colors">
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {generating ? 'Generating…' : hasInsights ? 'Regenerate Research' : 'Generate Research'}
-              </button>
-            )}
-            {hasEsv && !hasNotes && hasValidAIKey && (
-              <p className="text-xs text-slate-400">Add notes below, then generate research</p>
-            )}
+
+
 
             {/* Selection controls */}
-            {hasInsights && totalItems > 0 && (
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 ml-1">
-                <span className="font-semibold text-slate-700">{selectedCount}/{totalItems}</span>
-                <span>selected</span>
-                <span className="text-slate-300 mx-0.5">·</span>
-                <button onClick={selectAll}  className="text-violet-600 hover:text-violet-800 font-semibold">All</button>
-                <span className="text-slate-300">·</span>
-                <button onClick={clearAll}   className="text-slate-400 hover:text-slate-600 font-semibold">None</button>
-              </div>
-            )}
+
           </div>
 
-          {/* Step 4: Generate outline */}
-          {hasInsights && hasValidAIKey && (
-            <button onClick={handleGenerateOutline} disabled={genOutline}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-colors">
-              {genOutline ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-              {genOutline ? 'Generating Outline…' : 'Generate Outline'}
-            </button>
-          )}
+
         </div>
 
         {fetchError   && <ErrorBanner message={fetchError}   />}
         {genError     && <ErrorBanner message={genError}     />}
-        {outlineError && <ErrorBanner message={outlineError} />}
       </div>
 
       {/* ── Not loaded yet ─────────────────────────────────────────────────────── */}
@@ -376,12 +275,21 @@ export function VerseByVersePanel({
             <BookOpen className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Verse · Notes</span>
           </div>
-          <div className="flex items-center gap-1.5 pl-5">
-            <Sparkles className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
-              Research
-              {hasInsights && <span className="text-slate-300 font-normal normal-case tracking-normal"> · check to include in outline</span>}
-            </span>
+          <div className="flex items-center justify-between gap-2 pl-5">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                Research
+                {hasInsights && <span className="text-slate-300 font-normal normal-case tracking-normal"> · check to include in outline</span>}
+              </span>
+            </div>
+            {hasEsv && hasValidAIKey && (
+              <button onClick={handleGenerate} disabled={generating}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 hover:text-violet-600 hover:bg-violet-50 border border-slate-200 hover:border-violet-200 rounded-lg transition-colors disabled:opacity-40 shrink-0">
+                {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                {generating ? 'Generating…' : hasInsights ? 'Regenerate' : 'Generate'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -481,11 +389,12 @@ export function VerseByVersePanel({
                               className="flex-1 text-sm text-slate-700 bg-transparent resize-none focus:outline-none placeholder:text-slate-300 leading-relaxed min-h-[40px]"
                             />
 
-                            {/* Save state + delete */}
+                            {/* Save state + place + delete */}
                             <div className="flex items-center gap-1 shrink-0 mt-0.5">
                               {saveState === 'saving' && <Loader2 className="w-3 h-3 text-slate-300 animate-spin" />}
                               {saveState === 'saved'  && <Check   className="w-3 h-3 text-emerald-500" strokeWidth={2.5} />}
                               {saveState === 'error'  && <AlertCircle className="w-3 h-3 text-red-400" />}
+
                               <button
                                 onClick={() => handleDeleteNote(verse.verse_ref, note.id)}
                                 className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
@@ -540,49 +449,48 @@ export function VerseByVersePanel({
                           const items    = verseInsights[cat.key]
                           const has      = items && items.length > 0
                           const isActive = activeCat === cat.key
-                          const selCount = items
-                            ? items.filter((_, i) => selected.has(makeKey(verse.verse_ref, cat.key, i))).length
-                            : 0
+
                           return (
                             <button key={cat.key}
                               onClick={() => setActiveCategory(p => ({ ...p, [verse.verse_ref]: cat.key }))}
-                              disabled={!has}
                               className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${
-                                isActive ? 'bg-slate-900 text-white'
+                                isActive && has ? 'bg-slate-900 text-white'
+                                : isActive && !has ? 'bg-slate-200 text-slate-500'
                                 : has ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                : 'bg-slate-50 text-slate-300 cursor-default'
+                                : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
                               }`}>
                               {cat.label}
-                              {selCount > 0 && <span className="ml-1 text-[10px] font-bold text-violet-400">{selCount}✓</span>}
+                
                             </button>
                           )
                         })}
                       </div>
 
-                      {/* Selectable items */}
+                      {/* Research items — dig deeper prompt + place-in-outline */}
                       <div className="space-y-2">
-                        {(verseInsights[activeCat] ?? []).map((item, i) => {
-                          const key        = makeKey(verse.verse_ref, activeCat, i)
-                          const isSelected = selected.has(key)
-                          return (
-                            <div key={i} onClick={() => toggleItem(key)}
-                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all select-none ${
-                                isSelected
-                                  ? 'bg-violet-50 border-violet-200'
-                                  : 'bg-slate-50 border-transparent hover:border-slate-200 hover:bg-white'
-                              }`}>
-                              <span className={`mt-0.5 shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-                                isSelected ? 'bg-violet-600 border-violet-600' : 'border-slate-300 bg-white'
-                              }`}>
-                                {isSelected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                {item.title && <p className="text-xs font-semibold text-slate-700 mb-0.5">{item.title}</p>}
-                                <p className="text-sm text-slate-600 leading-relaxed">{item.content}</p>
-                              </div>
-                            </div>
-                          )
-                        })}
+                        {(verseInsights[activeCat] ?? []).map((item, i) => (
+                          <ResearchItemCard
+                            key={i}
+                            item={item}
+                            category={activeCat}
+                            verseRef={verse.verse_ref}
+                            itemIndex={i}
+                            sessionId={sessionId}
+                            onFlagToggle={(newFlagged) => {
+                              // Optimistically update insights in place
+                              onInsightsChange({
+                                ...insights,
+                                [verse.verse_ref]: {
+                                  ...(insights[verse.verse_ref] ?? {}),
+                                  [activeCat]: (insights[verse.verse_ref]?.[activeCat] ?? []).map((it, idx) =>
+                                    idx === i ? { ...it, is_flagged: newFlagged } : it
+                                  ),
+                                },
+                              })
+                              toggleInsightFlagAction(sessionId, verse.verse_ref, activeCat, i, newFlagged).catch(() => null)
+                            }}
+                          />
+                        ))}
                       </div>
                     </>
                   )}
@@ -593,28 +501,101 @@ export function VerseByVersePanel({
         )
       })}
 
-      {/* ── Bottom CTA ─────────────────────────────────────────────────────────── */}
-      {hasEsv && hasInsights && !generating && (
-        <div className="mt-2 mb-6 p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Ready to build your outline?</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {selectedCount > 0
-                ? `${selectedCount} insight${selectedCount === 1 ? '' : 's'} selected · all verse notes included`
-                : 'Select research insights above, or generate from your notes alone'}
-            </p>
-          </div>
-          {hasValidAIKey ? (
-            <button onClick={handleGenerateOutline} disabled={genOutline}
-              className="shrink-0 flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-colors">
-              {genOutline ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-              {genOutline ? 'Generating…' : 'Generate Outline'}
-            </button>
+      
+    </div>
+  )
+}
+
+
+
+// ── Dig deeper prompt builder ──────────────────────────────────────────────────
+function buildDigDeeperPrompt(item: { title: string; content: string }, category: string, verseRef: string): string {
+  const catLabel: Record<string, string> = {
+    word_study: 'word study', cross_refs: 'cross-reference', context: 'historical context',
+    practical: 'illustration/analogy', theology_by_tradition: 'theological point',
+    application: 'application', quotes: 'theologian quote',
+  }
+  const label = catLabel[category] ?? 'insight'
+  const itemDesc = item.title ? `"${item.title}" — ${item.content}` : item.content
+
+  return `I am studying ${verseRef} and came across this ${label}:
+
+${itemDesc}
+
+Please help me go deeper on this by providing:
+1. Clarification — explain this more fully in plain language
+2. Additional details — what else should I know about this that wasn't mentioned?
+3. Differing or opposing views — are there other interpretations or positions on this within orthodox Christianity?
+4. Further study — list 3–5 books, commentaries, or academic resources where I can research this topic more deeply
+
+Please be specific and academically grounded in your response.`
+}
+
+// ── Research item card ─────────────────────────────────────────────────────────
+function ResearchItemCard({
+  item, category, verseRef, itemIndex, sessionId, onFlagToggle,
+}: {
+  item: { title: string; content: string; is_flagged?: boolean; used_count?: number }
+  category: string
+  verseRef: string
+  itemIndex: number
+  sessionId: string
+  onFlagToggle: (flagged: boolean) => void
+}) {
+  const isChecked = !!item.is_flagged
+  const [copied, setCopied] = useState(false)
+
+  async function handleDigDeeper() {
+    const prompt = buildDigDeeperPrompt(item, category, verseRef)
+    await navigator.clipboard.writeText(prompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2500)
+  }
+
+  return (
+    <div
+      onClick={() => onFlagToggle(!isChecked)}
+      className={`group flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all select-none ${
+        isChecked
+          ? 'bg-violet-50 border-violet-200'
+          : 'bg-slate-50 border-transparent hover:border-slate-200 hover:bg-white'
+      }`}
+    >
+      {/* Checkbox */}
+      <span className={`mt-0.5 shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+        isChecked ? 'bg-violet-600 border-violet-600' : 'border-slate-300 bg-white'
+      }`}>
+        {isChecked && <span className="w-2 h-2 text-white font-bold text-[9px] leading-none">✓</span>}
+      </span>
+      <div className="flex-1 min-w-0">
+        {item.title && (
+          category === 'word_study' ? (
+            <WordStudyTitle title={item.title} />
+          ) : category === 'quotes' ? (
+            <p className="text-xs font-semibold text-slate-500 italic mb-0.5">{item.title}</p>
           ) : (
-            <p className="text-xs text-slate-400">Add an AI key in Settings to generate</p>
-          )}
-        </div>
-      )}
+            <p className="text-xs font-semibold text-slate-700 mb-0.5">{item.title}</p>
+          )
+        )}
+        <p className={`text-sm leading-relaxed ${category === 'quotes' ? 'text-slate-700 italic' : 'text-slate-600'}`}>
+          {category === 'quotes' && <span className="text-slate-300 mr-1 text-base">"</span>}
+          {item.content}
+          {category === 'quotes' && <span className="text-slate-300 ml-1 text-base">"</span>}
+        </p>
+      </div>
+      {/* Action buttons — appear on hover */}
+      <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDigDeeper() }}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+          title={copied ? 'Prompt copied!' : 'Copy a "dig deeper" prompt to paste into any AI tool'}
+        >
+          {copied
+            ? <Check className="w-3.5 h-3.5 text-emerald-500" strokeWidth={2.5} />
+            : <MessageSquare className="w-3.5 h-3.5" />}
+        </button>
+
+      </div>
     </div>
   )
 }
@@ -645,6 +626,20 @@ function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mt-2">
       <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{message}</span>
+    </div>
+  )
+}
+
+// ── Word study title: renders "λόγος (logos)" with original word prominent ────
+function WordStudyTitle({ title }: { title: string }) {
+  // Expected format: "originalWord (transliteration)" e.g. "λόγος (logos)"
+  const match = title.match(/^(.+?)\s+\((.+)\)$/)
+  if (!match) return <p className="text-xs font-semibold text-slate-700 mb-0.5">{title}</p>
+  const [, original, transliteration] = match
+  return (
+    <div className="flex items-baseline gap-2 mb-1">
+      <span className="text-base font-bold text-slate-800 leading-tight">{original}</span>
+      <span className="text-xs text-slate-500 font-medium">{transliteration}</span>
     </div>
   )
 }

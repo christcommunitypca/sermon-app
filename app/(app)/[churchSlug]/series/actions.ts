@@ -297,6 +297,7 @@ export async function skipWeekAction(
         status: 'planned',
         proposed_title: null,
         proposed_scripture: null,
+        is_gap_slot: true,      // marks this as a deletable gap on restore
       })
 
     // Bump total_weeks
@@ -378,6 +379,7 @@ export async function setGuestPreacherAction(
         guest_name: guestName.trim(),
         guest_in_series: false,
         status: 'planned',
+        is_gap_slot: true,      // marks this as a deletable gap on restore
       })
 
     const { data: series } = await supabaseAdmin
@@ -424,15 +426,16 @@ export async function restoreWeekAction(
 
   const { data: ss } = await supabaseAdmin
     .from('series_sessions')
-    .select('series_id, week_number, proposed_title, proposed_scripture, week_type, series(teacher_id)')
+    .select('series_id, week_number, proposed_title, proposed_scripture, week_type, is_gap_slot, series(teacher_id)')
     .eq('id', seriesSessionId)
     .single()
 
   if (!ss || (ss?.series as any)?.teacher_id !== user.id) return { error: 'Unauthorized' }
 
-  // If this is a gap row (no content, inserted by skip-with-push or standalone-guest):
-  // delete it and renumber subsequent weeks back
-  const isGapRow = !ss.proposed_title && !ss.proposed_scripture
+  // If this is a gap row (inserted blank slot by skip-with-push or standalone-guest):
+  // delete it and renumber subsequent weeks back.
+  // Use is_gap_slot — reliable even when teacher added optional title to the gap.
+  const isGapRow = (ss as any).is_gap_slot === true
 
   if (isGapRow) {
     await supabaseAdmin
@@ -466,7 +469,8 @@ export async function restoreWeekAction(
       .update({ total_weeks: Math.max(0, (series?.total_weeks ?? 1) - 1) })
       .eq('id', seriesId)
   } else {
-    // Row has content — just flip it back to normal
+    // Original content row — flip back to normal and clear skip metadata
+    // Note: we do NOT clear proposed_title/scripture — those were the original content
     const { error } = await supabaseAdmin
       .from('series_sessions')
       .update({

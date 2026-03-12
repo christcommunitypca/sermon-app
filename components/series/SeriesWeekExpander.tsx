@@ -241,7 +241,8 @@ export function SeriesWeekExpander({
             </button>
           )}
 
-          {/* Options ▾ dropdown */}
+          {/* Options ▾ dropdown — only on normal rows */}
+          {isNormal && (
           <div className="relative" ref={optionsRef}>
             <button
               onClick={() => { setOptionsOpen(o => !o); setPanel(null) }}
@@ -267,6 +268,7 @@ export function SeriesWeekExpander({
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
 

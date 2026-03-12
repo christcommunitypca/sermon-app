@@ -16,6 +16,7 @@ export const VERSION = 'v1.2'
 
 export const CATEGORIES = [
   'word_study',
+  'quotes',
   'cross_refs',
   'practical',
   'theology_by_tradition',
@@ -28,12 +29,12 @@ export type InsightCategory = typeof CATEGORIES[number]
 // Two batches — each covers 3 categories, run in parallel
 export const CATEGORY_BATCHES: InsightCategory[][] = [
   ['word_study', 'cross_refs', 'context'],
-  ['practical', 'theology_by_tradition', 'application'],
+  ['practical', 'theology_by_tradition', 'application', 'quotes'],
 ]
 
 const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
   word_study:
-    'Key Greek (NT) or Hebrew (OT) words. Transliteration + why this word matters. Only flag words that are genuinely significant.',
+    'Key Greek (NT) or Hebrew (OT) words. For each: title = "originalWord (transliteration)" e.g. "λόγος (logos)" or "חֶסֶד (hesed)". Content = why this word matters theologically. Only flag genuinely significant words.',
   cross_refs:
     'Related Bible verses — just the reference (e.g. "Rom 5:1") and a single phrase on why it connects. No quotes, no explanation paragraphs. Prefer less-obvious connections over the standard ones.',
   practical:
@@ -44,6 +45,8 @@ const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
     'One historical or cultural fact that would surprise most readers and directly illuminates meaning.',
   application:
     'One specific, concrete application grounded in the passage\'s own logic — not generic.',
+  quotes:
+    'Memorable quotes from respected theologians in the teacher\'s tradition that illuminate this verse. Format title as "Theologian Name (dates)" e.g. "John Calvin (1509–1564)". Content = the quote itself (15–40 words). Only include genuine, historically attested quotes — no fabrications. Max 2 per verse.',
 }
 
 // Build a prompt for one batch of 3 categories across all verses.

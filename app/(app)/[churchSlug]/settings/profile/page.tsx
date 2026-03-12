@@ -10,9 +10,9 @@ interface Props { params: { churchSlug: string } }
 export default async function ProfilePage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/sign-in')
-  const user = session.user
+  const { data: { session: authSession } } = await supabase.auth.getSession()
+  if (!authSession) redirect('/sign-in')
+  const user = authSession.user
 
   const { data: profile } = await supabaseAdmin
     .from('profiles')
@@ -33,6 +33,7 @@ export default async function ProfilePage({ params }: Props) {
           { href: `/${churchSlug}/settings/ai`, label: 'AI Key' },
           { href: `/${churchSlug}/settings/tradition`, label: 'Tradition' },
           { href: `/${churchSlug}/settings/notifications`, label: 'Notifications' },
+          { href: `/${churchSlug}/settings/calendar`, label: 'Calendar' },
         ].map(({ href, label }) => (
           <Link key={href} href={href}
             className="shrink-0 px-3 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors">

@@ -415,3 +415,97 @@ function getBlockDepth(blocks: OutlineBlock[], id: string, depth = 0): number {
   if (!block || !block.parent_id) return depth
   return getBlockDepth(blocks, block.parent_id, depth + 1)
 }
+
+// ── Increment used_count when a note is placed into outline ───────────────────
+export async function incrementNoteUsedCountAction(noteId: string): Promise<void> {
+  const { supabaseAdmin } = await import('@/lib/supabase/admin')
+  await supabaseAdmin.rpc('increment_note_used_count', { note_id: noteId })
+}
+
+// ── Increment used_count when a research item is placed into outline ──────────
+export async function incrementResearchUsedCountAction(itemId: string): Promise<void> {
+  const { supabaseAdmin } = await import('@/lib/supabase/admin')
+  await supabaseAdmin.rpc('increment_research_used_count', { item_id: itemId })
+}
+
+// ── Toggle is_flagged on a verse_insight item ─────────────────────────────────
+// verse_insights stores items as a JSON array: [{ title, content, is_flagged? }]
+// We update the specific item in the array by index.
+export async function toggleInsightFlagAction(
+  sessionId: string,
+  verseRef: string,
+  category: string,
+  itemIndex: number,
+  flagged: boolean
+): Promise<{ error: string | null }> {
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired' }
+
+  const { supabaseAdmin } = await import('@/lib/supabase/admin')
+
+  // Fetch current items
+  const { data, error } = await supabaseAdmin
+    .from('verse_insights')
+    .select('items')
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .eq('verse_ref', verseRef)
+    .eq('category', category)
+    .single()
+
+  if (error || !data) return { error: 'Insight not found' }
+
+  const items = (data.items as { title: string; content: string; is_flagged?: boolean }[])
+  if (!items[itemIndex]) return { error: 'Item index out of range' }
+
+  items[itemIndex] = { ...items[itemIndex], is_flagged: flagged }
+
+  const { error: updateError } = await supabaseAdmin
+    .from('verse_insights')
+    .update({ items })
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .eq('verse_ref', verseRef)
+    .eq('category', category)
+
+  return { error: updateError?.message ?? null }
+}
+
+// ── Increment used_count on a verse_insight item ──────────────────────────────
+export async function incrementInsightUsedCountAction(
+  sessionId: string,
+  verseRef: string,
+  category: string,
+  itemIndex: number
+): Promise<{ error: string | null }> {
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired' }
+
+  const { supabaseAdmin } = await import('@/lib/supabase/admin')
+
+  const { data, error } = await supabaseAdmin
+    .from('verse_insights')
+    .select('items')
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .eq('verse_ref', verseRef)
+    .eq('category', category)
+    .single()
+
+  if (error || !data) return { error: 'Insight not found' }
+
+  const items = (data.items as { title: string; content: string; is_flagged?: boolean; used_count?: number }[])
+  if (!items[itemIndex]) return { error: 'Item index out of range' }
+
+  items[itemIndex] = { ...items[itemIndex], used_count: (items[itemIndex].used_count ?? 0) + 1 }
+
+  const { error: updateError } = await supabaseAdmin
+    .from('verse_insights')
+    .update({ items })
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .eq('verse_ref', verseRef)
+    .eq('category', category)
+
+  return { error: updateError?.message ?? null }
+}

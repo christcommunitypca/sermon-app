@@ -4,9 +4,20 @@ import { useState, useEffect, useRef } from 'react'
 import { X, Play, Pause, RotateCcw, ChevronLeft, Type } from 'lucide-react'
 import { TeachingSession, OutlineBlock } from '@/types/database'
 import { getFlatRenderOrder, getDepth } from '@/lib/outline'
+import { renderInlineMarkup } from './OutlinePanel'
 
-const FONT_SIZES = ['text-lg', 'text-xl', 'text-2xl'] as const
+const FONT_SIZES = ['text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl'] as const
 type FontSize = typeof FONT_SIZES[number]
+
+// Each block type gets a relative size offset applied on top of the base fontSize
+const FONT_SCALE: Record<string, string> = {
+  point:        'font-semibold',
+  sub_point:    'font-normal',
+  scripture:    'italic',
+  illustration: '',
+  application:  '',
+  transition:   'opacity-60',
+}
 
 const BLOCK_TYPE_INDENT: Record<OutlineBlock['type'], string> = {
   point: '',
@@ -34,6 +45,8 @@ interface Props {
 
 export function DeliveryView({ session, blocks, churchSlug }: Props) {
   const [fontSize, setFontSize] = useState<FontSize>('text-xl')
+  // Map fontSize to numeric index for relative sizing
+  const fontIdx = FONT_SIZES.indexOf(fontSize)
   const [timerRunning, setTimerRunning] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -128,7 +141,7 @@ export function DeliveryView({ session, blocks, churchSlug }: Props) {
               className={`w-7 h-7 rounded flex items-center justify-center text-xs font-medium transition-colors ${
                 fontSize === size ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-slate-300'
               }`}
-              style={{ fontSize: `${10 + i * 2}px` }}
+              style={{ fontSize: `${9 + i * 3}px` }}
             >
               A
             </button>
@@ -154,14 +167,15 @@ export function DeliveryView({ session, blocks, churchSlug }: Props) {
             return (
               <div
                 key={block.id}
-                className={`${BLOCK_TYPE_INDENT[block.type]} select-none`}
-                style={{ paddingLeft: `${depth > 0 ? depth * 20 : 0}px` }}
+                className="select-none"
+                style={{ paddingLeft: `${depth * 28}px` }}
               >
                 <p className={`${fontSize} ${BLOCK_TYPE_STYLE[block.type]} leading-relaxed`}>
-                  {block.content || <span className="opacity-30 italic">Empty block</span>}
+                  {depth > 0 && <span className="opacity-20 mr-2">–</span>}
+                  {block.content ? renderInlineMarkup(block.content) : <span className="opacity-30 italic">Empty block</span>}
                 </p>
                 {block.estimated_minutes && (
-                  <p className="text-xs text-slate-600 mt-0.5">{block.estimated_minutes}m</p>
+                  <p className="text-xs text-slate-600 mt-0.5" style={{ paddingLeft: `${depth * 28}px` }}>{block.estimated_minutes}m</p>
                 )}
               </div>
             )

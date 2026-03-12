@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Sparkles, ClipboardCopy, Check, Loader2, Clock, BookMarked } from 'lucide-react'
+import { X, Sparkles, ClipboardCopy, Check, Loader2, Clock, Type, Info } from 'lucide-react'
 import {
   generateLessonSummaryAction,
   getLessonSummaryPromptAction,
@@ -21,12 +21,14 @@ interface SummaryResult {
 }
 
 export function LessonSummaryModal({ sessionId, blocks, onClose }: Props) {
-  const [result, setResult] = useState<SummaryResult | null>(null)
-  const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [result,        setResult]        = useState<SummaryResult | null>(null)
+  const [generating,    setGenerating]    = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
   const [copyingPrompt, setCopyingPrompt] = useState(false)
-  const [copiedTitles, setCopiedTitles] = useState(false)
-  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [copiedTitles,  setCopiedTitles]  = useState(false)
+  const [copiedPrompt,  setCopiedPrompt]  = useState(false)
+
+  const hasBlocks = blocks.length > 0
 
   async function handleGenerate() {
     setGenerating(true)
@@ -59,7 +61,7 @@ export function LessonSummaryModal({ sessionId, blocks, onClose }: Props) {
 
   async function handleCopyTitles() {
     if (!result?.titles.length) return
-    const text = result.titles.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n')
+    const text = result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')
     await navigator.clipboard.writeText(text)
     setCopiedTitles(true)
     setTimeout(() => setCopiedTitles(false), 2000)
@@ -68,50 +70,79 @@ export function LessonSummaryModal({ sessionId, blocks, onClose }: Props) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <BookMarked className="w-4 h-4 text-slate-600" />
-            <h2 className="text-sm font-semibold text-slate-900">Lesson Summary</h2>
+            <Sparkles className="w-4 h-4 text-violet-500" />
+            <h2 className="text-sm font-semibold text-slate-900">Outline Review</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-          >
+          <button onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
 
+        {/* What this does — always visible explanation */}
+        <div className="px-6 pt-4 pb-0">
+          <div className="flex gap-3 px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-600 leading-relaxed">
+            <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+            <div>
+              AI reads your outline and returns three things:
+              <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-slate-500">
+                <li><strong className="text-slate-600">Time estimate</strong> — rough delivery length based on content density</li>
+                <li><strong className="text-slate-600">Key theme</strong> — one-sentence summary of what the outline teaches</li>
+                <li><strong className="text-slate-600">Title suggestions</strong> — sermon/lesson title options to choose from</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {/* Action buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleGenerate}
-              disabled={generating || blocks.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-40 transition-colors"
-            >
-              {generating
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <Sparkles className="w-4 h-4" />}
-              {generating ? 'Generating…' : result ? 'Regenerate' : 'Generate'}
-            </button>
-            <button
-              onClick={handleCopyPrompt}
-              disabled={copyingPrompt || blocks.length === 0}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-40 transition-colors"
-            >
-              {copyingPrompt
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : copiedPrompt
-                  ? <Check className="w-4 h-4 text-emerald-600" />
-                  : <ClipboardCopy className="w-4 h-4" />}
-              {copiedPrompt ? 'Copied!' : 'Copy prompt'}
-            </button>
-          </div>
 
-          {blocks.length === 0 && (
-            <p className="text-xs text-slate-400">Build your outline first to generate a summary.</p>
+          {/* Empty state */}
+          {!hasBlocks && (
+            <div className="py-8 text-center">
+              <Type className="w-8 h-8 text-slate-200 mx-auto mb-3" />
+              <p className="text-sm text-slate-400">Build your outline first.</p>
+              <p className="text-xs text-slate-300 mt-1">Add at least one point before reviewing.</p>
+            </div>
+          )}
+
+          {/* Action buttons — only show when outline has content */}
+          {hasBlocks && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-60 transition-colors"
+              >
+                {generating
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Sparkles className="w-4 h-4" />}
+                {generating ? 'Reviewing…' : result ? 'Re-review' : 'Review Outline'}
+              </button>
+              <button
+                onClick={handleCopyPrompt}
+                disabled={copyingPrompt}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-60 transition-colors"
+                title="Copy the raw prompt to use in ChatGPT, Claude.ai, or any other AI tool"
+              >
+                {copyingPrompt
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : copiedPrompt
+                    ? <Check className="w-4 h-4 text-emerald-600" />
+                    : <ClipboardCopy className="w-4 h-4" />}
+                {copiedPrompt ? 'Copied!' : 'Copy prompt'}
+              </button>
+            </div>
+          )}
+
+          {hasBlocks && !result && !generating && (
+            <p className="text-xs text-slate-400">
+              Click <strong>Review Outline</strong> to generate, or copy the prompt to use in any AI tool.
+            </p>
           )}
 
           {error && (
@@ -140,7 +171,7 @@ export function LessonSummaryModal({ sessionId, blocks, onClose }: Props) {
                 </p>
               </div>
 
-              {/* Titles */}
+              {/* Title suggestions */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Title Suggestions</p>
@@ -154,14 +185,19 @@ export function LessonSummaryModal({ sessionId, blocks, onClose }: Props) {
                   </button>
                 </div>
                 <div className="space-y-1">
-                  {result.titles.map((title: string, i: number) => (
-                    <div
+                  {result.titles.map((title, i) => (
+                    <button
                       key={i}
-                      className="flex items-start gap-3 px-4 py-2.5 bg-white border border-slate-100 rounded-xl hover:border-slate-200 transition-colors"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(title)
+                      }}
+                      className="w-full flex items-start gap-3 px-4 py-2.5 bg-white border border-slate-100 rounded-xl hover:border-violet-200 hover:bg-violet-50 transition-colors text-left group"
+                      title="Click to copy"
                     >
                       <span className="text-xs font-mono text-slate-300 mt-0.5 w-5 shrink-0">{i + 1}</span>
-                      <span className="text-sm text-slate-700">{title}</span>
-                    </div>
+                      <span className="text-sm text-slate-700 flex-1">{title}</span>
+                      <ClipboardCopy className="w-3.5 h-3.5 text-slate-300 group-hover:text-violet-400 transition-colors shrink-0 mt-0.5" />
+                    </button>
                   ))}
                 </div>
               </div>

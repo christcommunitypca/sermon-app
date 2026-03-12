@@ -14,7 +14,7 @@ export async function getSeriesForTeacher(churchId: string, teacherId: string): 
 
 export async function getSeriesWithSessions(seriesId: string, teacherId: string): Promise<{
   series: Series
-  sessions: (SeriesSession & { teaching_session?: { title: string; status: string } | null })[]
+  sessions: (SeriesSession & { teaching_sessions?: { title: string; status: string; scheduled_date: string | null } | null })[]
 } | null> {
   const { data: series } = await supabaseAdmin
     .from('series')
@@ -27,7 +27,7 @@ export async function getSeriesWithSessions(seriesId: string, teacherId: string)
 
   const { data: sessions } = await supabaseAdmin
     .from('series_sessions')
-    .select('*, teaching_sessions(title, status)')
+    .select('*, teaching_sessions(title, status, scheduled_date)')
     .eq('series_id', seriesId)
     .order('week_number')
 

@@ -42,6 +42,7 @@ import * as ResearchPrompt from '@/lib/ai/prompts/research'
 import * as SeriesPrompt   from '@/lib/ai/prompts/series'
 import * as TagsPrompt     from '@/lib/ai/prompts/tags'
 import * as VerseInsightsPrompt from '@/lib/ai/prompts/verse-insights'
+import type { InsightCategory } from '@/lib/ai/prompts/verse-insights'
 import * as LessonSummaryPrompt from '@/lib/ai/prompts/lesson-summary'
 
 import type { OutlineBlock, ResearchCategory, ProposedWeek } from '@/types/database'
@@ -314,9 +315,11 @@ export async function suggestTags(
 }
 
 // ── generateVerseInsights ──────────────────────────────────────────────────────
-// Runs 2 parallel AI calls covering 3 categories each.
-// Keeps each response well under the 8192-token output ceiling.
-// Cost target: ~$0.04 for a 9-verse passage on Sonnet.
+// For short passages (≤4 verses): 2 parallel calls, 3 categories each.
+// For long passages (>4 verses): split into per-verse calls to avoid token truncation.
+// Each per-verse call covers 3 categories and needs ~1500 tokens max.
+
+const VERSE_SPLIT_THRESHOLD = 4
 
 export async function generateVerseInsights(
   userId: string,
@@ -329,6 +332,11 @@ export async function generateVerseInsights(
     verse_ref?: string
     category?: string
     items?: { title?: string; content?: string }[]
+  }
+
+  // Long passage: split into per-verse × per-batch calls (avoids JSON truncation)
+  if (input.verses.length > VERSE_SPLIT_THRESHOLD) {
+    return generateVerseInsightsSplit(userId, input, creds, provider)
   }
 
   const batchResults = await Promise.allSettled(
@@ -396,6 +404,106 @@ export async function generateVerseInsights(
   logTask('generateVerseInsights', result)
   return result
 }
+
+// ── Split path: one call per verse × batch (for long passages) ────────────────
+async function generateVerseInsightsSplit(
+  _userId: string,
+  input: VerseInsightInput,
+  creds: Awaited<ReturnType<typeof resolveCredentials>>,
+  provider: ReturnType<typeof getProvider>
+): Promise<VerseInsightResult> {
+  type RawBatchItem = {
+    verse_ref?: string
+    category?: string
+    items?: { title?: string; content?: string }[]
+  }
+
+  // Build all tasks: each verse × each batch = verses.length × 2 calls
+  // Run with concurrency limit of 4 to avoid rate limits
+  const tasks: { verse: typeof input.verses[0]; categories: InsightCategory[]; batchIdx: number }[] = []
+  for (const verse of input.verses) {
+    for (let b = 0; b < VerseInsightsPrompt.CATEGORY_BATCHES.length; b++) {
+      tasks.push({ verse, categories: VerseInsightsPrompt.CATEGORY_BATCHES[b], batchIdx: b })
+    }
+  }
+
+  const CONCURRENCY = 4
+  const results: RawVerseInsight[] = []
+  let model = ''
+  let providerName: ProviderName = 'anthropic'
+  let failCount = 0
+
+  // Process in chunks
+  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
+    const chunk = tasks.slice(i, i + CONCURRENCY)
+    const settled = await Promise.allSettled(chunk.map(async task => {
+      const singleVerseInput: VerseInsightInput = {
+        ...input,
+        verses: [task.verse],
+        pastorNotes: input.pastorNotes
+          ? { [task.verse.verse_ref]: input.pastorNotes[task.verse.verse_ref] ?? [] }
+          : undefined,
+        selectedWords: input.selectedWords
+          ? { [task.verse.verse_ref]: input.selectedWords[task.verse.verse_ref] ?? [] }
+          : undefined,
+      }
+      const prompt = VerseInsightsPrompt.buildBatchPrompt(singleVerseInput, task.categories)
+      // Single verse needs far fewer tokens
+      const cappedPrompt = { ...prompt, maxTokens: 1500 }
+      const completion = await provider.complete(cappedPrompt, creds)
+
+      if (!Array.isArray(completion.parsed)) {
+        throw new AIError('malformed_response',
+          `${task.verse.verse_ref} batch ${task.batchIdx + 1} — expected JSON array`)
+      }
+
+      model = completion.model
+      providerName = completion.provider
+
+      return (completion.parsed as RawBatchItem[])
+        .filter(item =>
+          item &&
+          typeof item.verse_ref === 'string' &&
+          typeof item.category === 'string' &&
+          Array.isArray(item.items)
+        )
+        .map(item => ({
+          verse_ref: item.verse_ref as string,
+          category: item.category as string,
+          items: (item.items ?? []).slice(0, 3).map(i => ({
+            title: i.title ?? '',
+            content: i.content ?? '',
+          })),
+        }))
+    }))
+
+    for (const r of settled) {
+      if (r.status === 'fulfilled') {
+        results.push(...r.value)
+      } else {
+        failCount++
+        console.warn('[generateVerseInsightsSplit] task failed:', r.reason)
+      }
+    }
+  }
+
+  if (results.length === 0) {
+    throw new AIError('generation_failed', 'All per-verse calls failed. Check your API key and try again.')
+  }
+
+  if (failCount > 0) {
+    console.warn(`[generateVerseInsightsSplit] ${failCount}/${tasks.length} tasks failed — partial results returned`)
+  }
+
+  return {
+    insights: results,
+    model,
+    provider: providerName,
+    prompt_version: VerseInsightsPrompt.VERSION,
+    duration_ms: 0,
+  }
+}
+
 
 // ── generateLessonSummary ──────────────────────────────────────────────────────
 

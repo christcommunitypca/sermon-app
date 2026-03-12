@@ -343,6 +343,8 @@ export interface SeriesSession {
   skip_reason: string | null
   guest_name: string | null
   guest_in_series: boolean
+  computed_date: string | null   // series.start_date + (week_number-1)*7 days
+  is_gap_slot: boolean           // true = inserted blank placeholder, restore = delete
   created_at: string
 }
 
@@ -386,6 +388,7 @@ export interface ResearchItem {
   confidence: Confidence | null
   is_pinned: boolean
   is_dismissed: boolean
+  used_count: number
   metadata: Json
   position: number
   created_at: string

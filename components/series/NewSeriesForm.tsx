@@ -7,6 +7,7 @@ import { ChevronLeft, Sparkles, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 import { SeriesPlanner } from '@/components/series/SeriesPlanner'
 import { ProposedWeek } from '@/types/database'
+import { matchObservancesToWeeks } from '@/lib/liturgical'
 
 interface FormState {
   title: string
@@ -49,7 +50,6 @@ export function NewSeriesForm({ churchId, churchSlug, hasValidAIKey, tradition }
 
     // Compute liturgical observances on the client side (pure computation)
     if (form.startDate) {
-      const { matchObservancesToWeeks } = await import('@/lib/liturgical')
       const obs = matchObservancesToWeeks(new Date(form.startDate), parseInt(form.totalWeeks), tradition)
       setObservances(obs)
     }

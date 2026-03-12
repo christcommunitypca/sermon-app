@@ -221,3 +221,17 @@ export async function deleteSessionAction(
   redirect(`/${churchSlug}/teaching`)
 }
 
+
+// ── Backfill scheduled_date from series computed date ─────────────────────────
+// Called when viewing a series and a linked session has no scheduled_date
+// but the series has a computable date for that week.
+export async function backfillScheduledDateAction(
+  sessionId: string,
+  scheduledDate: string
+): Promise<void> {
+  await supabaseAdmin
+    .from('teaching_sessions')
+    .update({ scheduled_date: scheduledDate })
+    .eq('id', sessionId)
+    .is('scheduled_date', null)   // only update if genuinely blank
+}

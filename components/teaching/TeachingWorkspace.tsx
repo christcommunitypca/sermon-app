@@ -1,6 +1,4 @@
 'use client'
-import { StepIndicator } from './StepIndicator'
-
 import React, { useState, useCallback } from 'react'
 import { BookOpen, List, Eye, Save, Sparkles } from 'lucide-react'
 import { VerseByVersePanel } from './VerseByVersePanel'
@@ -128,11 +126,6 @@ export function TeachingWorkspace({
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      {/* Step indicator — very top, centered */}
-      <div className="flex justify-center mb-2">
-        <StepIndicator steps={steps} />
-      </div>
-
       {/* Mode toggle + icon buttons — one tight row */}
       <div className="flex items-center gap-1.5 mb-3">
         {/* Mode toggle — larger pills */}

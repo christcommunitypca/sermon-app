@@ -192,11 +192,11 @@ export function OutlineReference({
                 </div>
               </div>
               {/* Verse filter — only shown when multiple verses */}
-              {allVerseRefs.length > 1 && (
+              {sortedVerseRefs.length > 1 && (
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Verses</p>
                   <div className="flex flex-wrap gap-1">
-                    {allVerseRefs.map(ref => {
+                    {sortedVerseRefs.map(ref => {
                       const isVisible = !hiddenVerses.has(ref)
                       const label = ref.replace(/^.+\s/, '')
                       return (

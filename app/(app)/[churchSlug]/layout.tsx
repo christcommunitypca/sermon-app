@@ -87,7 +87,7 @@ export default async function AppLayout({ children, params }: Props) {
           avatarUrl={profile?.avatar_url ?? null}
           unreadCount={unreadCount ?? 0}
         />
-        <main className="flex-1">
+        <main className="flex-1 md:ml-56">
           {children}
         </main>
       </div>

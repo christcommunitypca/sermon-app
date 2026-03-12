@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
 import { SessionDetailActions } from '@/components/teaching/SessionDetailActions'
 import { TeachingWorkspace } from '@/components/teaching/TeachingWorkspace'
+import { PageStepIndicator } from '@/components/teaching/PageStepIndicator'
 import { SessionHeader } from '@/components/teaching/SessionHeader'
 import { SessionStatus } from '@/types/database'
 import { hasValidKey } from '@/lib/ai/key'
@@ -99,15 +100,30 @@ export default async function SessionDetailPage({ params }: Props) {
   }
 
   const initialMode: TeachingMode = (session as any).teaching_mode ?? 'verse_by_verse'
+  // Step indicator state (server-computed for page header)
+  const stepHasVerses   = !!initialVerses?.length
+  const stepHasNotes    = Object.values(initialVerseNotes).some(arr => arr.some((n: any) => n.content?.trim()))
+  const stepHasResearch = Object.keys(initialInsights).length > 0
+  const stepHasBlocks   = blocks.length > 0
+  const stepIsPublished = session.status === 'published' || session.status === 'delivered'
 
   return (
     <div className="px-3 py-3">
-      {/* Header — 3 col grid: back | session info center | actions */}
-      <div className="flex items-center justify-between gap-3 mb-2">
+      {/* Header — 3-col: back link | step indicator centered | actions */}
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 mb-2">
         <Link href={`/${churchSlug}/teaching`}
           className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors">
           <ChevronLeft className="w-4 h-4" />Teaching
         </Link>
+        <div className="flex justify-center">
+          <PageStepIndicator
+            hasVerses={stepHasVerses}
+            hasNotes={stepHasNotes}
+            hasResearch={stepHasResearch}
+            hasBlocks={stepHasBlocks}
+            isPublished={stepIsPublished}
+          />
+        </div>
         <div className="flex items-center gap-2">
           {nextStatus && !isArchived && (
             <form action={updateSessionStatusAction.bind(null, sessionId, church.id, churchSlug, nextStatus.next)}>

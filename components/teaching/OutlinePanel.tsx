@@ -59,6 +59,7 @@ interface Props {
   flowStructure?: { type: string; label: string }[]
   hasValidAIKey: boolean
   estimatedDuration: number | null
+<<<<<<< HEAD
   initialVerses: Array<{ verse_ref: string; text: string }>
   initialInsights: Insights
   initialVerseNotes: Record<string, VerseNote[]>
@@ -66,6 +67,13 @@ interface Props {
   onSaveTrigger?:        (fn: () => void) => void
   onAITrigger?:          (fn: () => void) => void
   onRegisterAIContext?:  (ctx: { hasBlocks: boolean; aiLoading: boolean; onDraft: () => void; onReview: () => void }) => void
+=======
+  initialInsights: Insights
+  initialVerseNotes: Record<string, VerseNote[]>
+  onInsightsChange: (insights: Insights) => void
+  onSaveTrigger?:   (fn: () => void) => void
+  onAITrigger?:     (fn: () => void) => void
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   pending:          PendingItem | null
   onItemPlaced:     (item: PendingItem) => void
   onPendingFromRef: (item: PendingItem) => void
@@ -76,8 +84,13 @@ interface Props {
 export function OutlinePanel({
   outlineId, sessionId, churchId, churchSlug,
   blocks, onBlocksChange, flowStructure, hasValidAIKey,
+<<<<<<< HEAD
   estimatedDuration, initialVerses, initialInsights, initialVerseNotes,
   onInsightsChange, onSaveTrigger, onAITrigger, onRegisterAIContext, pending, onItemPlaced, onPendingFromRef, onCancelPending, steps,
+=======
+  estimatedDuration, initialInsights, initialVerseNotes,
+  onInsightsChange, onSaveTrigger, onAITrigger, pending, onItemPlaced, onPendingFromRef, onCancelPending, steps,
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }: Props) {
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -87,6 +100,17 @@ export function OutlinePanel({
   const [showSummary,   setShowSummary]   = useState(false)
   const [showAssist,    setShowAssist]    = useState(false)
   const [showDraftModal, setShowDraftModal] = useState(false)
+<<<<<<< HEAD
+=======
+  const assistRef = useRef<HTMLDivElement>(null)
+
+  // Register external trigger callbacks so workspace toolbar can fire these
+  useEffect(() => {
+    onSaveTrigger?.(() => setShowSnapshotInput(v => !v))
+    onAITrigger?.(() => setShowAssist(v => !v))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
   // AI state
   const [aiLoading, setAILoading] = useState(false)
@@ -94,6 +118,7 @@ export function OutlinePanel({
   const [aiError,      setAIError]      = useState<string | null>(null)
   const [hiddenVerses, setHiddenVerses] = useState<Set<string>>(new Set())
 
+<<<<<<< HEAD
   // Register external trigger callbacks so workspace toolbar can fire these
   useEffect(() => {
     onSaveTrigger?.(() => { flushSave().catch(() => null) })
@@ -116,6 +141,8 @@ export function OutlinePanel({
     latestBlocksRef.current = blocks
   }, [blocks])
 
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   function toggleVerse(ref: string) {
     setHiddenVerses(prev => { const n = new Set(prev); n.has(ref) ? n.delete(ref) : n.add(ref); return n })
   }
@@ -126,7 +153,10 @@ export function OutlinePanel({
   ])).sort()
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+<<<<<<< HEAD
   const latestBlocksRef = useRef<OutlineBlock[]>(blocks)
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   const flatBlocks = getFlatRenderOrder(blocks)
   const totalMins = totalEstimatedMinutes(blocks)
   const targetMins = estimatedDuration ?? 0
@@ -136,6 +166,7 @@ export function OutlinePanel({
 
   // ── Auto-save ────────────────────────────────────────────────────────────────
   const scheduleSave = useCallback((newBlocks: OutlineBlock[]) => {
+<<<<<<< HEAD
     latestBlocksRef.current = newBlocks
   
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -143,12 +174,18 @@ export function OutlinePanel({
   
     saveTimerRef.current = setTimeout(async () => {
       saveTimerRef.current = null
+=======
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    setSaveState('saving')
+    saveTimerRef.current = setTimeout(async () => {
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       const result = await saveBlocksAction(outlineId, sessionId, churchId, newBlocks)
       if (result.error) {
         setSaveState('error')
       } else {
         setSaveState('saved')
         setLastSaved(new Date())
+<<<<<<< HEAD
       }
     }, 800)
   }, [outlineId, sessionId, churchId])
@@ -171,6 +208,13 @@ export function OutlinePanel({
     }
   }
   
+=======
+        setTimeout(() => setSaveState('idle'), 2000)
+      }
+    }, 800)
+  }, [outlineId, sessionId, churchId])
+
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   function update(newBlocks: OutlineBlock[]) {
     onBlocksChange(newBlocks)
     scheduleSave(newBlocks)
@@ -198,6 +242,7 @@ export function OutlinePanel({
 
   function handleMoveUp(id: string) { update(moveUp(blocks, id)) }
   function handleMoveDown(id: string) { update(moveDown(blocks, id)) }
+<<<<<<< HEAD
   function handlePromote(id: string) {
     const promoted = promote(blocks, id)
     // If promoted to root level (no parent), convert sub_point → point
@@ -218,6 +263,10 @@ export function OutlinePanel({
       update(demoted)
     }
   }
+=======
+  function handlePromote(id: string) { update(promote(blocks, id)) }
+  function handleDemote(id: string) { update(demote(blocks, id)) }
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
   function handleAddBelow(afterId: string) {
     const anchor = blocks.find((b: OutlineBlock) => b.id === afterId)
@@ -353,9 +402,15 @@ export function OutlinePanel({
 
   return (
     <>
+<<<<<<< HEAD
     <div className="flex gap-3 min-h-[600px] overflow-x-hidden">
       {/* ── Left: Outline editor ─────────────────────────────────────────── */}
       <div className="w-[48%] min-w-0 flex-shrink-0 flex flex-col gap-3 relative">
+=======
+    <div className="flex gap-5 min-h-[600px]">
+      {/* ── Left: Outline editor ─────────────────────────────────────────── */}
+      <div className="w-[50%] flex flex-col gap-3">
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
         {/* Snapshot input — shown inline when triggered from workspace toolbar */}
         {showSnapshotInput && (
           <div className="flex items-center gap-1">
@@ -378,10 +433,30 @@ export function OutlinePanel({
           </div>
         )}
 
+<<<<<<< HEAD
         {/* AssistDropdown now rendered in TeachingWorkspace toolbar, anchored to AI button */}
 
         {/* Save state indicator */}
         <SaveIndicator state={saveState} lastSaved={lastSaved} />
+=======
+        {/* AI assist dropdown — triggered from workspace toolbar button */}
+        <div className="relative" ref={assistRef} style={{ height: 0 }}>
+          {showAssist && (
+            <AssistDropdown
+              hasBlocks={blocks.length > 0}
+              aiLoading={aiLoading}
+              onDraftOutline={() => { setShowAssist(false); setShowDraftModal(true) }}
+              onOutlineReview={() => { setShowAssist(false); setShowSummary(true) }}
+              onClose={() => setShowAssist(false)}
+            />
+          )}
+        </div>
+
+        {/* Save state indicator */}
+        {(saveState === 'saved' || saveState === 'saving' || saveState === 'error') && (
+          <SaveIndicator state={saveState} lastSaved={lastSaved} />
+        )}
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
         {/* Time bar — shown below toolbar when target is set */}
         {targetMins > 0 && (
@@ -484,9 +559,14 @@ export function OutlinePanel({
       </div>
 
       {/* ── Right: Reference panel ───────────────────────────────────────── */}
+<<<<<<< HEAD
       <div className="flex-1 min-w-0 overflow-y-auto flex flex-col gap-2 min-h-0">
         <OutlineReference
           verses={initialVerses}
+=======
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0">
+        <OutlineReference
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
           insights={initialInsights}
           verseNotes={initialVerseNotes}
           hiddenVerses={hiddenVerses}
@@ -622,6 +702,7 @@ function BlockRow({
         }
         ${dimmed ? 'opacity-40 pointer-events-none select-none' : ''}
       `}
+<<<<<<< HEAD
       style={{ marginLeft: `${depth * 24}px` }}
 
     >
@@ -640,6 +721,24 @@ function BlockRow({
           {BLOCK_TYPE_LABELS[block.type]}
         </span>
       </div>
+=======
+      style={{ marginLeft: `${depth * 20}px` }}
+
+    >
+      {/* Type selector — shows Sub-N label for sub_points based on depth */}
+      <select
+        value={block.type}
+        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onTypeChange(block.id, e.target.value as OutlineBlock['type'])}
+        className="shrink-0 text-xs text-slate-400 bg-transparent border-none focus:outline-none cursor-pointer py-1 -ml-1 max-w-[90px]"
+      >
+        {Object.entries(BLOCK_TYPE_LABELS).map(([val, label]) => (
+          <option key={val} value={val}>{label}</option>
+        ))}
+      </select>
+      {block.type === 'sub_point' && depth > 0 && (
+        <span className="text-[10px] text-slate-300 -ml-1 mr-1 shrink-0">Sub-{depth}</span>
+      )}
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
       {/* Content */}
       <div className="flex-1 min-w-0">
@@ -724,8 +823,13 @@ function BlockRow({
         <div className="flex gap-0.5">
           <IconBtn onClick={onMoveUp} disabled={!canMoveUp} title="Move up"><ChevronUp className="w-3.5 h-3.5" /></IconBtn>
           <IconBtn onClick={onMoveDown} disabled={!canMoveDown} title="Move down"><ChevronDown className="w-3.5 h-3.5" /></IconBtn>
+<<<<<<< HEAD
           <IconBtn onClick={onPromote} disabled={!canPromote} title="Outdent ←"><ChevronLeft className="w-3.5 h-3.5" /></IconBtn>
           <IconBtn onClick={onDemote} disabled={!canDemote} title="Indent →"><ChevronRight className="w-3.5 h-3.5" /></IconBtn>
+=======
+          <IconBtn onClick={onPromote} disabled={!canPromote} title="Promote"><ChevronLeft className="w-3.5 h-3.5" /></IconBtn>
+          <IconBtn onClick={onDemote} disabled={!canDemote} title="Demote"><ChevronRight className="w-3.5 h-3.5" /></IconBtn>
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
         </div>
         <div className="flex gap-0.5 mt-0.5">
           <IconBtn onClick={onAddBelow} title="Add block below"><Plus className="w-3.5 h-3.5" /></IconBtn>
@@ -771,6 +875,7 @@ function EmptyOutline({ outlineId, onAdd }: { outlineId: string; onAdd: (b: Outl
 }
 
 function SaveIndicator({ state, lastSaved }: { state: SaveState; lastSaved: Date | null }) {
+<<<<<<< HEAD
   let text = 'Last saved —'
   let className = 'text-xs text-slate-400'
 
@@ -788,6 +893,13 @@ function SaveIndicator({ state, lastSaved }: { state: SaveState; lastSaved: Date
   }
 
   return <span className={className}>{text}</span>
+=======
+  if (state === 'saving') return <span className="text-xs text-slate-400 animate-pulse">Saving…</span>
+  if (state === 'saved') return <span className="text-xs text-emerald-600">Saved</span>
+  if (state === 'error') return <span className="text-xs text-red-500">Save failed</span>
+  if (lastSaved) return <span className="text-xs text-slate-300">Saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+  return null
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }
 
 function AIProposalBanner({ blocks, onAccept, onDiscard }: {
@@ -842,7 +954,11 @@ function AssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview,
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   return (
     <div id="assist-menu" className="absolute right-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-30 overflow-hidden">
       <div className="p-1.5 space-y-0.5">

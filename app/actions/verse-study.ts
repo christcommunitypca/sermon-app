@@ -5,8 +5,11 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { fetchPassage, type VerseData } from '@/lib/esv'
 import {
   generateVerseInsights,
+<<<<<<< HEAD
   generatePericopeInsights,
   type PericopeSection,
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   generateLessonSummary,
   buildCopyablePrompt,
   AIError,
@@ -15,6 +18,7 @@ import { getUserTradition } from '@/lib/research'
 import { getFlatRenderOrder } from '@/lib/outline'
 import type { OutlineBlock, VerseNote } from '@/types/database'
 
+<<<<<<< HEAD
 type InsightItem = {
   title: string
   content: string
@@ -23,6 +27,8 @@ type InsightItem = {
   is_flagged?: boolean
   used_count?: number
 }
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 // ── fetchVerseDataAction ───────────────────────────────────────────────────────
 // Returns cached ESV text + saved insights + all verse notes.
 // Called on page load and after AI generation.
@@ -32,12 +38,16 @@ export async function fetchVerseDataAction(
   scriptureRef: string
 ): Promise<{
   verses: VerseData[] | null
+<<<<<<< HEAD
   insights: Record<string, Record<string, {
     title: string
     content: string
     source_label?: string
     source_url?: string
   }[]>>
+=======
+  insights: Record<string, Record<string, { title: string; content: string }[]>>
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   verseNotes: Record<string, VerseNote[]>
   error: string | null
 }> {
@@ -62,6 +72,7 @@ export async function fetchVerseDataAction(
         .order('position'),
     ])
 
+<<<<<<< HEAD
     const insights: Record<string, Record<string, {
       title: string
       content: string
@@ -72,6 +83,12 @@ export async function fetchVerseDataAction(
     for (const row of insightRows ?? []) {
       if (!insights[row.verse_ref]) insights[row.verse_ref] = {}
       insights[row.verse_ref][row.category] = row.items as InsightItem[]
+=======
+    const insights: Record<string, Record<string, { title: string; content: string }[]>> = {}
+    for (const row of insightRows ?? []) {
+      if (!insights[row.verse_ref]) insights[row.verse_ref] = {}
+      insights[row.verse_ref][row.category] = row.items as { title: string; content: string }[]
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     }
 
     const verseNotes: Record<string, VerseNote[]> = {}
@@ -304,6 +321,7 @@ export async function generateVerseInsightsAction(
       teacher_id: user.id,
       verse_ref: insight.verse_ref,
       category: insight.category,
+<<<<<<< HEAD
       items:
       insight.category === 'word_study'
         ? filterWordStudyItems(
@@ -311,6 +329,9 @@ export async function generateVerseInsightsAction(
         selectedWords?.[insight.verse_ref] ?? []
         )
         : dedupeInsightItems(insight.items ?? []),
+=======
+      items: insight.items,
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       model: result.model,
       prompt_version: result.prompt_version,
       generated_at: new Date().toISOString(),
@@ -413,6 +434,7 @@ export async function getLessonSummaryPromptAction(
 export async function updateTeachingModeAction(
   sessionId: string,
   mode: 'study' | 'outline'
+
 ): Promise<void> {
   const user = await getActionUser()
   if (!user) return
@@ -521,7 +543,11 @@ export async function incrementInsightUsedCountAction(
 
   if (error || !data) return { error: 'Insight not found' }
 
+<<<<<<< HEAD
   const items = data.items as InsightItem[]
+=======
+  const items = (data.items as { title: string; content: string; is_flagged?: boolean; used_count?: number }[])
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   if (!items[itemIndex]) return { error: 'Item index out of range' }
 
   items[itemIndex] = { ...items[itemIndex], used_count: (items[itemIndex].used_count ?? 0) + 1 }
@@ -536,6 +562,7 @@ export async function incrementInsightUsedCountAction(
 
   return { error: updateError?.message ?? null }
 }
+<<<<<<< HEAD
 
 // ── generatePericopeInsightsAction ───────────────────────────────────────────
 // Generates insights for a single pericope section.
@@ -764,3 +791,5 @@ export async function updateStudyModeAction(
     .eq('id', sessionId)
     .eq('teacher_id', user.id)
 }
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e

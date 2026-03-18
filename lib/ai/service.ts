@@ -37,15 +37,23 @@ import {
   type TagResult,
 } from '@/lib/ai/types'
 
+<<<<<<< HEAD
 import * as OutlinePrompt from '@/lib/ai/prompts/outline'
 import * as ResearchPrompt from '@/lib/ai/prompts/research'
 import * as SeriesPrompt from '@/lib/ai/prompts/series'
 import * as TagsPrompt from '@/lib/ai/prompts/tags'
+=======
+import * as OutlinePrompt  from '@/lib/ai/prompts/outline'
+import * as ResearchPrompt from '@/lib/ai/prompts/research'
+import * as SeriesPrompt   from '@/lib/ai/prompts/series'
+import * as TagsPrompt     from '@/lib/ai/prompts/tags'
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 import * as VerseInsightsPrompt from '@/lib/ai/prompts/verse-insights'
 import type { InsightCategory } from '@/lib/ai/prompts/verse-insights'
 import * as LessonSummaryPrompt from '@/lib/ai/prompts/lesson-summary'
 
 import type { OutlineBlock, ResearchCategory, ProposedWeek } from '@/types/database'
+<<<<<<< HEAD
 import type { VerseData } from '@/lib/esv'
 import type {
   VerseInsightInput,
@@ -67,16 +75,29 @@ export type {
   SeriesResult,
   TagInput,
   TagResult,
+=======
+import type { VerseInsightInput, VerseInsightResult, RawVerseInsight, LessonSummaryInput, LessonSummaryResult, ProviderName } from '@/lib/ai/types'
+
+// ── Re-export types so callers only need one import ───────────────────────────
+export type {
+  OutlineInput, OutlineResult,
+  ResearchInput, ResearchResult, ResearchItemPayload,
+  SeriesInput, SeriesResult,
+  TagInput, TagResult,
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 } from '@/lib/ai/types'
 export { AIError } from '@/lib/ai/types'
 export type { AIErrorCode } from '@/lib/ai/types'
 
+<<<<<<< HEAD
 type AIInsightItem = {
   title?: string
   content?: string
   source_label?: string
   source_url?: string
 }
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 // ── Credential resolution ─────────────────────────────────────────────────────
 // Single function. Reads from user_ai_credentials via key.ts.
 // Throws AIError on any failure — callers do not need to handle nulls.
@@ -350,12 +371,16 @@ export async function generateVerseInsights(
   type RawBatchItem = {
     verse_ref?: string
     category?: string
+<<<<<<< HEAD
     items?: {
       title?: string
       content?: string
       source_label?: string
       source_url?: string
     }[]
+=======
+    items?: { title?: string; content?: string }[]
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   }
 
   // Long passage: split into per-verse × per-batch calls (avoids JSON truncation)
@@ -383,7 +408,11 @@ export async function generateVerseInsights(
         .map(item => ({
           verse_ref: item.verse_ref as string,
           category: item.category as string,
+<<<<<<< HEAD
             items: (item.items ?? []).slice(0, 2).map(i => ({
+=======
+          items: (item.items ?? []).slice(0, 3).map(i => ({
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
             title: i.title ?? '',
             content: i.content ?? '',
           })),
@@ -439,7 +468,11 @@ async function generateVerseInsightsSplit(
   type RawBatchItem = {
     verse_ref?: string
     category?: string
+<<<<<<< HEAD
     items?: { title?: string; content?: string; source_label?: string; source_url?: string }[]
+=======
+    items?: { title?: string; content?: string }[]
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   }
 
   // Build all tasks: each verse × each batch = verses.length × 2 calls
@@ -473,7 +506,11 @@ async function generateVerseInsightsSplit(
       }
       const prompt = VerseInsightsPrompt.buildBatchPrompt(singleVerseInput, task.categories)
       // Single verse needs far fewer tokens
+<<<<<<< HEAD
       const cappedPrompt = { ...prompt, maxTokens: 1200 }
+=======
+      const cappedPrompt = { ...prompt, maxTokens: 1500 }
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       const completion = await provider.complete(cappedPrompt, creds)
 
       if (!Array.isArray(completion.parsed)) {
@@ -491,6 +528,7 @@ async function generateVerseInsightsSplit(
           typeof item.category === 'string' &&
           Array.isArray(item.items)
         )
+<<<<<<< HEAD
 .map(item => ({
   verse_ref: item.verse_ref as string,
   category: item.category as string,
@@ -501,6 +539,16 @@ async function generateVerseInsightsSplit(
     source_url: i.source_url ?? undefined,
   })),
 }))
+=======
+        .map(item => ({
+          verse_ref: item.verse_ref as string,
+          category: item.category as string,
+          items: (item.items ?? []).slice(0, 3).map(i => ({
+            title: i.title ?? '',
+            content: i.content ?? '',
+          })),
+        }))
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     }))
 
     for (const r of settled) {
@@ -530,6 +578,10 @@ async function generateVerseInsightsSplit(
   }
 }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 // ── generateLessonSummary ──────────────────────────────────────────────────────
 
 export async function generateLessonSummary(
@@ -568,6 +620,7 @@ export async function generateLessonSummary(
 
 // Re-export copyable prompt builder for use in server actions
 export { buildCopyablePrompt } from '@/lib/ai/prompts/lesson-summary'
+<<<<<<< HEAD
 
 // ── generatePericopeInsights ────────────────────────────────────────────────
 // Uses the same VerseInsights prompt as VBV, but treats the section as a single
@@ -689,3 +742,5 @@ export async function generatePericopeInsights(
   logTask('generatePericopeInsights', result)
   return result
 }
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e

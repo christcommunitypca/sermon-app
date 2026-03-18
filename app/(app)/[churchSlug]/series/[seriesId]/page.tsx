@@ -5,7 +5,11 @@ import { getSeriesWithSessions } from '@/lib/series'
 import { ChevronLeft, BookOpen, Calendar, Plus } from 'lucide-react'
 import { createSessionFromSeriesWeekAction } from '../actions'
 import { backfillScheduledDateAction } from '../../teaching/actions'
+<<<<<<< HEAD
 import { SeriesWeekList } from '@/components/series/SeriesWeekList'
+=======
+import { SeriesWeekExpander } from '@/components/series/SeriesWeekExpander'
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
 interface Props { params: { churchSlug: string; seriesId: string } }
 
@@ -157,6 +161,7 @@ export default async function SeriesDetailPage({ params }: Props) {
         {sessions.length} week{sessions.length !== 1 ? 's' : ''}
       </h2>
 
+<<<<<<< HEAD
       <SeriesWeekList
         sessions={sessions as any}
         seriesId={seriesId}
@@ -164,6 +169,41 @@ export default async function SeriesDetailPage({ params }: Props) {
         startDate={series.start_date ?? null}
         createWeekSession={createWeekSession}
       />
+=======
+      <div className="space-y-2">
+        {sessions.map(ss => {
+          const weekDateStr = computeWeekDate(ss.week_number)
+          const weekDateLabel = weekDateStr
+            ? new Date(weekDateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            : null
+
+          const linkedSession = (ss as any).teaching_sessions
+
+          // Detect conflict: session has a scheduled_date that differs from computed
+          const sessionScheduledDate = linkedSession?.scheduled_date as string | null
+          const hasConflict = !!(weekDateStr && sessionScheduledDate && sessionScheduledDate !== weekDateStr)
+
+          return (
+            <SeriesWeekExpander
+              key={ss.id}
+              ss={ss}
+              linkedSession={linkedSession}
+              weekDate={weekDateLabel}
+              weekDateIso={weekDateStr}
+              hasConflict={hasConflict}
+              conflictDate={hasConflict ? sessionScheduledDate : null}
+              churchSlug={churchSlug}
+              seriesId={seriesId}
+              createWeekSession={createWeekSession}
+            />
+          )
+        })}
+
+        {sessions.length === 0 && (
+          <p className="text-center py-10 text-slate-400 text-sm">No weeks planned yet.</p>
+        )}
+      </div>
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     </div>
   )
 }

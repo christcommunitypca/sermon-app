@@ -15,10 +15,16 @@ import {
   Presentation
 } from 'lucide-react'
 import { updateSessionStatusAction } from '../actions'
+<<<<<<< HEAD
 import { fetchPassageWithHeaders } from '@/lib/esv'
 import type { TeachingMode } from '@/components/teaching/TeachingWorkspace'
 
 interface Props { params: { churchSlug: string; sessionId: string }}
+=======
+import type { TeachingMode } from '@/components/teaching/TeachingWorkspace'
+
+interface Props { params: { churchSlug: string; sessionId: string } }
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
 const STATUS_NEXT: Partial<Record<SessionStatus, { label: string; next: SessionStatus }>> = {
   draft: { label: 'Publish', next: 'published' },
@@ -71,6 +77,7 @@ export default async function SessionDetailPage({ params }: Props) {
     } catch { /* not cached yet — user will click Load Text */ }
   }
 
+<<<<<<< HEAD
   // Fetch pericope section headers (for narrative passages)
   let initialPericSections: Array<{label: string; startVerse: string}> = []
   let initialHasSectionHeaders = false
@@ -90,6 +97,8 @@ export default async function SessionDetailPage({ params }: Props) {
     } catch { /* non-fatal — pericope detection best-effort */ }
   }
 
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   let initialInsights: Record<string, Record<string, { title: string; content: string }[]>> = {}
   let initialVerseNotes: Record<string, import('@/types/database').VerseNote[]> = {}
 
@@ -119,6 +128,7 @@ export default async function SessionDetailPage({ params }: Props) {
     }
   }
 
+<<<<<<< HEAD
   const rawTeachingMode = (session as any).teaching_mode
   const rawStudyMode = (session as any).study_mode
   
@@ -128,6 +138,9 @@ export default async function SessionDetailPage({ params }: Props) {
   const initialStudyMode: 'vbv' | 'pericope' =
     rawStudyMode === 'pericope' ? 'pericope' : 'vbv'
 
+=======
+  const initialMode: TeachingMode = (session as any).teaching_mode ?? 'verse_by_verse'
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   // Step indicator state (server-computed for page header)
   const stepHasVerses   = !!initialVerses?.length
   const stepHasNotes    = Object.values(initialVerseNotes).some(arr => arr.some((n: any) => n.content?.trim()))
@@ -136,7 +149,11 @@ export default async function SessionDetailPage({ params }: Props) {
   const stepIsPublished = session.status === 'published' || session.status === 'delivered'
 
   return (
+<<<<<<< HEAD
     <div className="px-4 py-3">
+=======
+    <div className="px-3 py-3">
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       {/* Header — 3-col: back link | step indicator centered | actions */}
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 mb-2">
         <Link href={`/${churchSlug}/teaching`}
@@ -213,18 +230,25 @@ export default async function SessionDetailPage({ params }: Props) {
           flowStructure={matchingFlow?.structure}
           hasValidAIKey={hasValidAIKey}
           scriptureRef={session.scripture_ref ?? null}
+<<<<<<< HEAD
           initialMode={initialMode}
           initialStudyMode={initialStudyMode}
+=======
+          initialMode={(session as any).teaching_mode ?? 'verse_by_verse'}
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
           estimatedDuration={session.estimated_duration ?? null}
           initialVerses={initialVerses}
           initialInsights={initialInsights}
           initialVerseNotes={initialVerseNotes}
           isPublished={session.status === 'published' || session.status === 'delivered'}
+<<<<<<< HEAD
           sessionTitle={session.title}
           scheduledDate={(session as any).scheduled_date ?? null}
           initialPericSections={initialPericSections}
           initialHasSectionHeaders={initialHasSectionHeaders}
           initialPericopeSetupComplete={initialPericopeSetupComplete}
+=======
+>>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
         />
       </div>
     </div>

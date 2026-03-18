@@ -154,11 +154,7 @@ export async function createSessionFromSeriesWeekAction(
       teacher_id: user.id,
       type: 'sermon',
       title: ss.proposed_title ?? `Week ${ss.week_number}`,
-<<<<<<< HEAD
       scripture_ref: null, // User adds scripture manually on the teaching page
-=======
-      scripture_ref: ss.proposed_scripture ?? null,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       notes: ss.notes ?? null,
       scheduled_date: computedDate,
       status: 'draft',
@@ -583,7 +579,6 @@ export async function insertGapAfterWeekAction(
   revalidatePath(`/${churchSlug}/series/${seriesId}`)
   return {}
 }
-<<<<<<< HEAD
 
 // ── insertLessonAfterWeekAction ───────────────────────────────────────────────
 // Inserts a new normal planned week after `afterWeekNumber`.
@@ -710,5 +705,3 @@ export async function deleteSeriesWeekAction(
   revalidatePath(`/${churchSlug}/series/${seriesId}`)
   return {}
 }
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e

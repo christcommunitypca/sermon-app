@@ -68,6 +68,10 @@ interface Props {
   onPericopeSetupCompleteChange: (complete: boolean) => void
 
   onScriptureRefSet: (ref: string) => void
+  focusMode: boolean
+  activeSectionIdx: number
+  onActiveSectionChange: (idx: number) => void
+  paneVisibility: { scripture: boolean; notes: boolean; research: boolean }
 }
 
 export function VerseByVersePanel({
@@ -96,6 +100,10 @@ export function VerseByVersePanel({
   pericopeSetupComplete,
   onPericopeSetupCompleteChange,
   onScriptureRefSet,
+  focusMode,
+  activeSectionIdx,
+  onActiveSectionChange,
+  paneVisibility,
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<Record<string, CategoryKey>>({})
   const [collapsed,      setCollapsed]      = useState<Set<string>>(new Set())
@@ -440,12 +448,16 @@ function toggleWord(verseRef: string, word: string) {
        verseNotes={verseNotes}
       onVerseNotesChange={onVerseNotesChange}
        pending={null}
+       focusMode={focusMode}
+       activeSectionIdx={activeSectionIdx}
+       onActiveSectionChange={onActiveSectionChange}
+       paneVisibility={paneVisibility}
        onItemPlaced={(item) =>
          onPendingItem({
            sourceId: item.id,
            content: item.content,
            type: item.type as any,
-           sourceKind: 'research',
+           sourceKind: item.source === 'note' ? 'note' : 'research',
          })
        }
      />

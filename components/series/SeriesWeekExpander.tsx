@@ -4,11 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import {
   BookOpen, Plus, ExternalLink, ChevronDown, Flame, User,
-<<<<<<< HEAD
   Ban, RotateCcw, Check, Loader2, AlertCircle, ChevronRight, Trash2,
-=======
-  Ban, RotateCcw, Check, Loader2, AlertCircle, ChevronRight,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 } from 'lucide-react'
 import type { SeriesSession } from '@/types/database'
 import {
@@ -37,21 +33,14 @@ interface Props {
   churchSlug:        string
   seriesId:          string
   createWeekSession: (id: string) => Promise<void>
-<<<<<<< HEAD
   extraBadge?: React.ReactNode
   onDelete?:   (() => void) | null
   isDeleting?: boolean
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }
 
 export function SeriesWeekExpander({
   ss, linkedSession, weekDate, weekDateIso, hasConflict, conflictDate,
-<<<<<<< HEAD
   churchSlug, seriesId, createWeekSession, extraBadge, onDelete, isDeleting,
-=======
-  churchSlug, seriesId, createWeekSession,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }: Props) {
   const [panel,        setPanel]        = useState<PanelMode>(null)
   const [saving,       setSaving]       = useState(false)
@@ -173,9 +162,10 @@ export function SeriesWeekExpander({
                 ⚠ Date conflict
               </button>
             )}
-            
+
             {/* Extra badge (verse conflict etc) */}
             {extraBadge}
+
             {/* Status badge — only for normal weeks */}
             {isNormal && (
               <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLES[ss.status]}`}>

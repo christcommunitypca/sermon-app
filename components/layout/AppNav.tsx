@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOutAction } from '@/app/actions/auth'
@@ -29,6 +29,16 @@ interface Props {
 export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, unreadCount }: Props) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [desktopPeekOpen, setDesktopPeekOpen] = useState(false)
+  const isTeachingDetail = /^\/[^/]+\/teaching\/[^/]+$/.test(pathname)
+
+  useEffect(() => {
+    function onToggle() {
+      if (isTeachingDetail) setDesktopPeekOpen(v => !v)
+    }
+    window.addEventListener('toggle-teaching-nav', onToggle as EventListener)
+    return () => window.removeEventListener('toggle-teaching-nav', onToggle as EventListener)
+  }, [isTeachingDetail])
 
   const base = `/${churchSlug}`
   const isAdmin = userRole === 'owner' || userRole === 'admin'
@@ -55,6 +65,7 @@ export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, 
   return (
     <>
       {/* ── Desktop sidebar ───────────────────────────────────────────────── */}
+      {!isTeachingDetail && (
       <aside className="hidden md:flex flex-col fixed left-0 top-0 h-full w-56 bg-white border-r border-slate-200 z-30">
         {/* Church name */}
         <div className="px-5 py-5 border-b border-slate-100">
@@ -103,6 +114,7 @@ export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, 
           </button>
         </div>
       </aside>
+      )}
 
       {/* ── Mobile top bar ────────────────────────────────────────────────── */}
       <div className="md:hidden sticky top-0 z-40 bg-white border-b border-slate-200 flex items-center justify-between px-4 py-3"
@@ -151,9 +163,39 @@ export function AppNav({ churchSlug, churchName, userRole, userName, avatarUrl, 
         </div>
       )}
 
+
+      {isTeachingDetail && desktopPeekOpen && (
+        <>
+          <div className="hidden md:block fixed inset-0 z-30 bg-black/10" onClick={() => setDesktopPeekOpen(false)} />
+          <aside className="hidden md:flex flex-col fixed left-0 top-0 h-full w-56 bg-white border-r border-slate-200 z-40 shadow-xl">
+            <div className="px-5 py-5 border-b border-slate-100">
+              <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">Teaching</p>
+              <p className="text-sm font-semibold text-slate-900 truncate">{churchName}</p>
+            </div>
+            <nav className="flex-1 px-3 py-4 space-y-0.5" aria-label="Main navigation">
+              {visibleItems.map(item => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setDesktopPeekOpen(false)}
+                  className={`relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    isActive(item.href)
+                      ? 'bg-slate-100 text-slate-900'
+                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </aside>
+        </>
+      )}
+
       {/* ── Desktop content offset ────────────────────────────────────────── */}
       {/* Add left padding on desktop to account for fixed sidebar */}
-      <div className="hidden md:block w-56 shrink-0" aria-hidden />
+      {!isTeachingDetail && <div className="hidden md:block w-56 shrink-0" aria-hidden />}
     </>
   )
 }

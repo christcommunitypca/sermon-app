@@ -1,14 +1,18 @@
 'use client'
-import React, { useState, useCallback, useEffect } from 'react'
-import { BookOpen, List, Eye, Save, Sparkles, Share2 } from 'lucide-react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
+import { BookOpen, Save, Sparkles, Share2, NotebookPen } from 'lucide-react'
 import { VerseByVersePanel } from './VerseByVersePanel'
-import { OutlinePanel } from './OutlinePanel'
 import { ExportModal } from './ExportModal'
-import { updateTeachingModeAction, updateStudyModeAction } from '@/app/actions/verse-study'
+import { updateStudyModeAction } from '@/app/actions/verse-study'
 import type { OutlineBlock, VerseNote } from '@/types/database'
 import type { VerseData } from '@/lib/esv'
-
-// ── Pending placement ─────────────────────────────────────────────────────────
+import { TeachingNavToggleButton } from './TeachingNavToggleButton'
+import {
+  buildOutlinePromptParts,
+  renderOutlinePromptForHuman,
+  renderOutlinePromptForLLM,
+} from '@/lib/outlinePrompt'
+import { OutlinePanel, DraftOutlineModal, PromptPreviewModal } from './OutlinePanel'
 export interface PendingItem {
   content:    string
   type:       OutlineBlock['type']
@@ -17,15 +21,13 @@ export interface PendingItem {
 }
 
 export type TeachingMode = 'verse_by_verse' | 'outline' | 'pericope'
-
-// ── Step indicator (shared between both views) ────────────────────────────────
 export type StepKey = 'load_text' | 'notes' | 'research' | 'outline' | 'ai_review' | 'publish'
 
 export interface StepState {
   key:        StepKey
   label:      string
   done:       boolean
-  inProgress: boolean  // started but not confirmed complete
+  inProgress: boolean
   active:     boolean
   future:     boolean
 }
@@ -34,18 +36,17 @@ export function buildSteps(
   hasVerses:   boolean,
   hasNotes:    boolean,
   hasResearch: boolean,
-  hasBlocks:   boolean,   // outline has content
+  hasBlocks:   boolean,
   isPublished: boolean,
 ): StepState[] {
   const steps: { key: StepKey; label: string; done: boolean }[] = [
     { key: 'load_text', label: 'Load Text',     done: hasVerses },
-    { key: 'notes',     label: 'Notes',          done: hasNotes },
-    { key: 'research',  label: 'Research',       done: hasResearch },
-    { key: 'outline',   label: 'Build Outline',  done: false },
-    { key: 'ai_review', label: 'AI Review',      done: false },
-    { key: 'publish',   label: 'Publish',        done: isPublished },
+    { key: 'notes',     label: 'Notes',         done: hasNotes },
+    { key: 'research',  label: 'Research',      done: hasResearch },
+    { key: 'outline',   label: 'Build Outline', done: false },
+    { key: 'ai_review', label: 'AI Review',     done: false },
+    { key: 'publish',   label: 'Publish',       done: isPublished },
   ]
-  // Active = first undone step
   const firstUndoneIdx = steps.findIndex(s => !s.done)
   return steps.map((s, i) => ({
     ...s,
@@ -57,6 +58,12 @@ export function buildSteps(
 
 type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 
+type SectionHeader = { label: string; startVerse: string; endVerse?: string }
+
+type PaneKey = 'scripture' | 'notes' | 'research'
+
+type PaneVisibility = Record<PaneKey, boolean>
+
 interface Props {
   sessionId:         string
   churchId:          string
@@ -66,7 +73,6 @@ interface Props {
   flowStructure?:    { type: string; label: string }[]
   hasValidAIKey:     boolean
   scriptureRef:      string | null
-  initialMode:       TeachingMode
   initialStudyMode: 'vbv' | 'pericope'
   estimatedDuration: number | null
   initialVerses:     VerseData[] | null
@@ -80,76 +86,157 @@ interface Props {
   initialPericopeSetupComplete?: boolean
 }
 
+function verseRangeForSection(verses: VerseData[] | null, sections: SectionHeader[], idx: number) {
+  const section = sections[idx]
+  if (!section) return ''
+  const verseList = verses ?? []
+  const startIdx = verseList.findIndex(v => v.verse_ref === section.startVerse)
+  if (startIdx === -1) return section.startVerse
+  let endIdx = verseList.length - 1
+  if (section.endVerse) {
+    const explicit = verseList.findIndex(v => v.verse_ref === section.endVerse)
+    if (explicit >= startIdx) endIdx = explicit
+  } else if (idx + 1 < sections.length) {
+    const nextIdx = verseList.findIndex(v => v.verse_ref === sections[idx + 1].startVerse)
+    if (nextIdx > startIdx) endIdx = nextIdx - 1
+  }
+  const first = verseList[startIdx]?.verse_ref ?? section.startVerse
+  const last = verseList[endIdx]?.verse_ref ?? first
+  const firstParts = first.match(/^(.+)\s(\d+):(\d+)$/)
+  const lastParts = last.match(/^(.+)\s(\d+):(\d+)$/)
+  if (firstParts && lastParts && firstParts[1] === lastParts[1] && firstParts[2] === lastParts[2]) {
+    return `${firstParts[1]} ${firstParts[2]}:${firstParts[3]}–${lastParts[3]}`
+  }
+  return first === last ? first : `${first}–${last}`
+}
+
+function verseRefsForSection(verses: VerseData[] | null, sections: SectionHeader[], idx: number) {
+  const section = sections[idx]
+  if (!section || !verses?.length) return []
+  const startIdx = verses.findIndex(v => v.verse_ref === section.startVerse)
+  if (startIdx === -1) return [section.startVerse]
+  let endIdx = verses.length - 1
+  if (section.endVerse) {
+    const explicit = verses.findIndex(v => v.verse_ref === section.endVerse)
+    if (explicit >= startIdx) endIdx = explicit
+  } else if (idx + 1 < sections.length) {
+    const nextIdx = verses.findIndex(v => v.verse_ref === sections[idx + 1].startVerse)
+    if (nextIdx > startIdx) endIdx = nextIdx - 1
+  }
+  return verses.slice(startIdx, endIdx + 1).map(v => v.verse_ref)
+}
+
 export function TeachingWorkspace({
   sessionId, churchId, churchSlug, outlineId,
   initialBlocks, flowStructure, hasValidAIKey,
-  scriptureRef, initialMode, initialStudyMode, estimatedDuration,
+  scriptureRef, initialStudyMode, estimatedDuration,
   initialVerses, initialInsights, initialVerseNotes,
   isPublished, sessionTitle, scheduledDate,
   initialPericSections, initialHasSectionHeaders, initialPericopeSetupComplete = false,
 }: Props) {
   const computedInitialMode: TeachingMode =
-  initialMode === 'outline'
-    ? 'outline'
-    : initialMode === 'pericope'
-      ? 'pericope'
-      : 'verse_by_verse'
+    initialStudyMode === 'pericope' ? 'pericope' : 'verse_by_verse'
 
-const [mode, setMode] = useState<TeachingMode>(computedInitialMode)
-  const [verses,     setVerses]     = useState<VerseData[] | null>(initialVerses)
-  const [insights,   setInsights]   = useState<Insights>(initialInsights)
+
+  const [mode, setMode] = useState<TeachingMode>(computedInitialMode)
+  const [verses, setVerses] = useState<VerseData[] | null>(initialVerses)
+  const [insights, setInsights] = useState<Insights>(initialInsights)
   const [verseNotes, setVerseNotes] = useState<Record<string, VerseNote[]>>(initialVerseNotes)
-  const [blocks,     setBlocks]     = useState<OutlineBlock[]>(initialBlocks)
-  const [pending,      setPending]      = useState<PendingItem | null>(null)
+  const [blocks, setBlocks] = useState<OutlineBlock[]>(initialBlocks)
+  const [pending, setPending] = useState<PendingItem | null>(null)
   const outlineSaveFn = React.useRef<() => Promise<void> | void>(() => {})
-  const outlineAIFn   = React.useRef<() => void>(() => {})
+  const outlineAIFn = React.useRef<() => void>(() => {})
   const [localScriptureRef, setLocalScriptureRef] = useState<string | null>(scriptureRef)
-  const [showAssist,   setShowAssist]   = useState(false)
-  const [showExport,       setShowExport]       = useState(false)
+  const [showExport, setShowExport] = useState(false)
+  const [focusMode, setFocusMode] = useState(initialStudyMode === 'pericope')
   const [pericopeMode, setPericopeMode] = useState<'vbv' | 'pericope'>(initialStudyMode)
-  const [pericSections,    setPericSections]    = useState<Array<{label:string;startVerse:string}>>(initialPericSections ?? [])
+  const [pericSections, setPericSections] = useState<Array<{label:string;startVerse:string}>>(initialPericSections ?? [])
   const [hasSectionHeaders, setHasSectionHeaders] = useState(initialHasSectionHeaders ?? false)
-  const [pericopeSetupComplete, setPericopeSetupComplete] = useState(
-    (initialPericopeSetupComplete ?? false) || (initialPericSections?.length ?? 0) > 0
-  )
-  const [aiContext,    setAIContext]    = useState<{
-    hasBlocks: boolean; aiLoading: boolean;
-    onDraft: () => void; onReview: () => void
-  } | null>(null)
-  
+  const [pericopeSetupComplete, setPericopeSetupComplete] = useState((initialPericopeSetupComplete ?? false) || (initialPericSections?.length ?? 0) > 0)
+  const [activeSectionIdx, setActiveSectionIdx] = useState(0)
+  const [outlineSectionRefs, setOutlineSectionRefs] = useState<string[] | null>(null)
+  const [outlineReferenceTab, setOutlineReferenceTab] = useState<'notes' | 'ai'>('ai')
+  const [showDraftOutlineModal, setShowDraftOutlineModal] = useState(false)
+  const hasOutline = blocks.length > 0
+  const showOutlinePane = hasOutline
+  const [paneVisibility, setPaneVisibility] = useState<PaneVisibility>({
+    scripture: true,
+    notes: true,
+    research: true,
+  })
+  const [showPromptPreviewModal, setShowPromptPreviewModal] = useState(false)
+  const [humanPromptPreview, setHumanPromptPreview] = useState('')
+  const [llmPromptPreview, setLlmPromptPreview] = useState('')
+
   useEffect(() => {
-    if (pericSections.length > 0 && !pericopeSetupComplete) {
-      setPericopeSetupComplete(true)
-    }
+    if (pericSections.length > 0 && !pericopeSetupComplete) setPericopeSetupComplete(true)
   }, [pericSections, pericopeSetupComplete])
-  const aiButtonRef = React.useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     updateStudyModeAction(sessionId, pericopeMode).catch(() => null)
   }, [sessionId, pericopeMode])
 
-  function handleModeChange(newMode: TeachingMode) {
-    setMode(newMode)
+  useEffect(() => {
+    const topbar = document.getElementById('session-page-topbar')
+    const detailHeader = document.getElementById('session-page-detail-header')
+    const shouldCollapse = focusMode
+    if (topbar) topbar.style.display = shouldCollapse ? 'none' : ''
+    if (detailHeader) detailHeader.style.display = shouldCollapse ? 'none' : ''
+    return () => {
+      if (topbar) topbar.style.display = ''
+      if (detailHeader) detailHeader.style.display = ''
+    }
+  }, [focusMode])
+
+ 
+  const sectionChips = useMemo(() => (
+    pericSections.map((section, idx) => ({
+      idx,
+      label: verseRangeForSection(verses, pericSections as SectionHeader[], idx),
+      refs: verseRefsForSection(verses, pericSections as SectionHeader[], idx),
+    }))
+  ), [pericSections, verses])
+
+  useEffect(() => {
+    if (activeSectionIdx > Math.max(sectionChips.length - 1, 0)) setActiveSectionIdx(0)
+  }, [activeSectionIdx, sectionChips.length])
+
+  function persistMode(nextMode: TeachingMode) {
+    setMode(nextMode)
+  }
+
+  function openOutline(openAssist = false) {
+    if (sectionChips[activeSectionIdx]) {
+      setOutlineSectionRefs(sectionChips[activeSectionIdx].refs)
+    }
+    //setMode('outline')
+    if (openAssist) setQueueOutlineAssist(true)
+  }
   
-    updateTeachingModeAction(
-      sessionId,
-      newMode === 'outline' ? 'outline' : 'study'
-    ).catch(() => null)
+  function handleSelectSection(idx: number) {
+    setActiveSectionIdx(idx)
+    if (showOutlinePane) setOutlineSectionRefs(sectionChips[idx]?.refs ?? null)
+  }
+
+  function handleTogglePane(pane: PaneKey) {
+    setPaneVisibility(prev => {
+      const currentlyVisible = (prev.scripture ? 1 : 0) + (prev.notes ? 1 : 0) + (prev.research ? 1 : 0)
+      if (prev[pane] && currentlyVisible === 1) return prev
+      return { ...prev, [pane]: !prev[pane] }
+    })
   }
 
   const handleOutlineGenerated = useCallback((newBlocks: OutlineBlock[]) => {
     setBlocks(newBlocks)
-    handleModeChange('outline')
-  }, [])
+    openOutline(false)
+  }, [sectionChips.length, activeSectionIdx])
 
   const handleItemPlaced = useCallback((item: PendingItem) => {
     if (item.sourceKind === 'note') {
       setVerseNotes(prev => {
         const next = { ...prev }
         for (const ref of Object.keys(next)) {
-          next[ref] = next[ref].map(n =>
-            n.id === item.sourceId ? { ...n, used_count: n.used_count + 1 } : n
-          )
+          next[ref] = next[ref].map(n => n.id === item.sourceId ? { ...n, used_count: n.used_count + 1 } : n)
         }
         return next
       })
@@ -157,194 +244,366 @@ const [mode, setMode] = useState<TeachingMode>(computedInitialMode)
     setPending(null)
   }, [])
 
-  // Build step state for both panels
-  const hasVerses   = !!verses?.length
-  const hasNotes    = Object.values(verseNotes).some(arr => arr.some(n => n.content.trim()))
+  const hasVerses = !!verses?.length
+  const hasNotes = Object.values(verseNotes).some(arr => arr.some(n => n.content.trim()))
   const hasResearch = Object.keys(insights).length > 0
-  const hasBlocks   = blocks.length > 0
+  const hasBlocks = blocks.length > 0
   const steps = buildSteps(hasVerses, hasNotes, hasResearch, hasBlocks, isPublished)
-
-  return (
+  const showSectionRail = sectionChips.length > 0 && pericopeMode === 'pericope' && !hasOutline
+  const canTogglePanes = !hasOutline && pericopeMode === 'pericope'
+  const lockedStudyMode = initialStudyMode
+  
+    return (
     <div className="flex flex-col min-h-0 flex-1">
-      {/* Mode toggle + icon buttons — one tight row */}
-      <div className="flex items-center gap-1.5 mb-3">
-        {/* Mode toggle — larger pills */}
-        <div className="flex items-center gap-0.5 p-1 bg-slate-100 rounded-xl shrink-0">
-          <ModeButton active={mode !== 'outline'} icon={<BookOpen className="w-4 h-4" />}
-            label={pericopeMode === 'pericope' ? 'Pericope' : 'Verse by Verse'} onClick={() => handleModeChange('verse_by_verse')} />
-          <ModeButton active={mode === 'outline'} icon={<List className="w-4 h-4" />}
-            label="Outline" onClick={() => handleModeChange('outline')} />
-        </div>
+      <div className={`mb-3 ${focusMode ? 'sticky top-2 z-20 rounded-xl border border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80' : ''}`}>
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-2 min-w-0">
+<div className="flex items-center gap-2 shrink-0 min-w-0">
+  <div className="w-9 flex justify-center shrink-0">
+    {focusMode ? (
+      <button
+        type="button"
+        onClick={() => {
+          const nav = document.getElementById('teaching-nav-flyout-toggle')
+          ;(nav as HTMLButtonElement | null)?.click()
+        }}
+        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+        title="Show menu"
+      >
+        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M4 6h16" />
+          <path d="M4 12h16" />
+          <path d="M4 18h16" />
+        </svg>
+      </button>
+    ) : null}
+  </div>
 
-        {/* Save + AI icons — only in outline mode */}
-        {mode === 'outline' && (
-          <>
-            <button onClick={() => outlineSaveFn.current?.()}
-              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              title="Save version">
-              <Save className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => outlineAIFn.current?.()}
-              className="flex items-center gap-0.5 px-2 py-1.5 text-slate-500 hover:text-violet-700 hover:bg-violet-50 border border-slate-200 hover:border-violet-200 rounded-lg transition-colors text-xs font-medium"
-              title="AI Assistance">
-              <Sparkles className="w-3.5 h-3.5" />
-            </button>
-          </>
-        )}
-        <a href={`/${churchSlug}/deliver/${sessionId}`} target="_blank" rel="noopener noreferrer"
-          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-          title="Preview delivery mode">
-          <Eye className="w-3.5 h-3.5" />
-        </a>
+  <div className="flex items-center p-1 bg-slate-100 rounded-xl shrink-0">
+    <button
+      type="button"
+      onClick={() => setFocusMode(v => !v)}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-900 shadow-sm hover:bg-slate-50 transition-colors"
+      title={focusMode ? 'Expand header' : 'Collapse header'}
+    >
+      <BookOpen className="w-4 h-4" />
+      {lockedStudyMode === 'vbv' ? 'Verse by Verse' : 'Pericope'}
+    </button>
+  </div>
+</div>
 
-        {mode === 'outline' && blocks.length > 0 && (
+          <div className="min-w-0 overflow-x-auto">
+            {showOutlinePane ? (
+              <div className="flex items-center gap-1.5 px-1 min-w-max">
+                {([
+                  ['ai', 'AI'],
+                  ['notes', 'Notes'],
+                ] as const).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setOutlineReferenceTab(tab)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors whitespace-nowrap ${outlineReferenceTab === tab ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : showSectionRail ? (
+              <div className="flex items-center gap-1.5 px-1 min-w-max">
+                {sectionChips.map(chip => (
+                  <button
+                    key={`${chip.idx}-${chip.label}`}
+                    type="button"
+                    onClick={() => handleSelectSection(chip.idx)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] border whitespace-nowrap transition-colors ${activeSectionIdx === chip.idx ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            ) : hasOutline ? (
+              <p className="px-1 text-xs text-slate-400 whitespace-nowrap">Build notes in study mode, then open or redraft the outline here.</p>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-0">
+          {showOutlinePane ? (
+  <>
+    <button
+      onClick={() => outlineSaveFn.current?.()}
+      className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+      title="Save version"
+    >
+      <Save className="w-3.5 h-3.5" />
+    </button>
+
+    <button
+      onClick={() => outlineAIFn.current?.()}
+      className="flex items-center gap-0.5 px-2 py-1.5 text-slate-500 hover:text-violet-700 hover:bg-violet-50 border border-slate-200 hover:border-violet-200 rounded-lg transition-colors text-xs font-medium"
+      title="AI Assistance"
+    >
+      <Sparkles className="w-3.5 h-3.5" />
+    </button>
+
+    {blocks.length > 0 && (
+      <button
+        onClick={() => setShowExport(true)}
+        className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+        title="Export outline"
+      >
+        <Share2 className="w-3.5 h-3.5" />
+      </button>
+    )}
+  </>
+) : (
+  <>
+    {canTogglePanes && (
+      <div className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1 py-1">
+        {([
+          ['scripture', 'Scripture'],
+          ['notes', 'Notes'],
+          ['research', 'AI'],
+        ] as [PaneKey, string][]).map(([pane, label]) => (
           <button
-            onClick={() => setShowExport(true)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-            title="Export outline"
+            key={pane}
+            type="button"
+            onClick={() => handleTogglePane(pane)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+              paneVisibility[pane]
+                ? 'bg-white text-slate-800 shadow-sm'
+                : 'text-slate-400 bg-transparent hover:text-slate-700'
+            }`}
           >
-            <Share2 className="w-3.5 h-3.5" />
+            {label}
           </button>
-        )}
+        ))}
+      </div>
+    )}
+
+    {!hasOutline && (
+      <button
+       onClick={() => {
+        setShowDraftOutlineModal(true)
+      }}
+      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors"
+    >
+      <Sparkles className="w-3.5 h-3.5" />
+      Generate outline
+    </button>
+    )}
+  </>
+)}
+          </div>
+        </div>
       </div>
 
-      {mode !== 'outline' ? (
-        <VerseByVersePanel
-          sessionId={sessionId}
-          churchId={churchId}
-          scriptureRef={localScriptureRef}
-          onScriptureRefSet={setLocalScriptureRef}
-          hasValidAIKey={hasValidAIKey}
-          flowStructure={flowStructure}
-          estimatedDuration={estimatedDuration}
-          verses={verses}
-          insights={insights}
-          verseNotes={verseNotes}
-          onVersesChange={setVerses}
-          onInsightsChange={setInsights}
-          onVerseNotesChange={setVerseNotes}
-          onOutlineGenerated={handleOutlineGenerated}
-          onPendingItem={setPending}
-          pendingItemId={pending?.sourceId ?? null}
-          steps={steps}
-          pericopeMode={pericopeMode}
-          onPericopeModeChange={setPericopeMode}
-          pericopeSections={pericSections}
-          onPericopeSectionsChange={setPericSections}
-          hasSectionHeaders={hasSectionHeaders}
-          onHasSectionHeadersChange={setHasSectionHeaders}
-          pericopeSetupComplete={pericopeSetupComplete}
-          onPericopeSetupCompleteChange={setPericopeSetupComplete}
-        />
-      ) : (
-        <OutlinePanel
-          sessionId={sessionId}
-          churchId={churchId}
-          churchSlug={churchSlug}
-          outlineId={outlineId}
-          blocks={blocks}
-          onBlocksChange={setBlocks}
-          flowStructure={flowStructure}
-          hasValidAIKey={hasValidAIKey}
-          estimatedDuration={estimatedDuration}
-          initialVerses={verses ?? []}
-          initialInsights={insights}
-          initialVerseNotes={verseNotes}
-          onInsightsChange={setInsights}
-          onSaveTrigger={fn => { outlineSaveFn.current = fn }}
-          onAITrigger={fn => { outlineAIFn.current = fn }}
-          onRegisterAIContext={ctx => setAIContext(ctx)}
-          pending={pending}
-          onItemPlaced={handleItemPlaced}
-          onPendingFromRef={setPending}
-          onCancelPending={() => setPending(null)}
-          steps={steps}
-        />
-      )}
-
-{showExport && (
-  <ExportModal
+      {showOutlinePane ? (
+  <OutlinePanel
+    sessionId={sessionId}
+    churchId={churchId}
+    churchSlug={churchSlug}
+    outlineId={outlineId}
     blocks={blocks}
-    sessionTitle={sessionTitle}
-    scriptureRef={scriptureRef}
-    scheduledDate={scheduledDate}
-    onClose={() => setShowExport(false)}
-    onBeforeExport={async () => {
-      await outlineSaveFn.current?.()
+    onBlocksChange={setBlocks}
+    flowStructure={flowStructure}
+    hasValidAIKey={hasValidAIKey}
+    estimatedDuration={estimatedDuration}
+    initialVerses={verses ?? []}
+    initialInsights={insights}
+    initialVerseNotes={verseNotes}
+    onInsightsChange={setInsights}
+    onSaveTrigger={fn => { outlineSaveFn.current = fn }}
+    //onAITrigger={fn => { outlineAIFn.current = fn }}
+    pending={pending}
+    onItemPlaced={handleItemPlaced}
+    onPendingFromRef={setPending}
+    onCancelPending={() => setPending(null)}
+    steps={steps}
+    activeSectionVerseRefs={outlineSectionRefs ?? undefined}
+    activeReferenceTab={outlineReferenceTab}
+    onReferenceTabChange={(tab) => {
+      if (tab === 'notes' || tab === 'ai') setOutlineReferenceTab(tab)
     }}
+    sessionTitle={sessionTitle}
+    sessionType="Sermon"
+    sessionNotes={null}
+    scriptureRef={localScriptureRef}
+  />
+) : (
+  <VerseByVersePanel
+    sessionId={sessionId}
+    churchId={churchId}
+    scriptureRef={localScriptureRef}
+    onScriptureRefSet={setLocalScriptureRef}
+    hasValidAIKey={hasValidAIKey}
+    flowStructure={flowStructure}
+    estimatedDuration={estimatedDuration}
+    verses={verses}
+    insights={insights}
+    verseNotes={verseNotes}
+    onVersesChange={setVerses}
+    onInsightsChange={setInsights}
+    onVerseNotesChange={setVerseNotes}
+    onOutlineGenerated={handleOutlineGenerated}
+    onPendingItem={setPending}
+    pendingItemId={pending?.sourceId ?? null}
+    steps={steps}
+    pericopeMode={pericopeMode}
+    onPericopeModeChange={setPericopeMode}
+    pericopeSections={pericSections}
+    onPericopeSectionsChange={setPericSections}
+    hasSectionHeaders={hasSectionHeaders}
+    onHasSectionHeadersChange={setHasSectionHeaders}
+    pericopeSetupComplete={pericopeSetupComplete}
+    onPericopeSetupCompleteChange={setPericopeSetupComplete}
+    focusMode={focusMode}
+    activeSectionIdx={activeSectionIdx}
+    onActiveSectionChange={setActiveSectionIdx}
+    paneVisibility={paneVisibility}
   />
 )}
 
-      {/* Pending placement banner */}
+{showDraftOutlineModal && (
+  <DraftOutlineModal
+    insights={insights}
+    verseNotes={verseNotes}
+    aiLoading={false}
+    hasBlocks={blocks.length > 0}
+    onGenerate={(selectedInsights) => {
+      setShowDraftOutlineModal(false)
+
+      const notesForAI: Record<string, string> = {}
+      for (const [vRef, notes] of Object.entries(verseNotes)) {
+        const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+        if (text) notesForAI[vRef] = text
+      }
+
+      outlineAIFn.current = async () => {}
+      ;(async () => {
+        const { generateOutlineAction } = await import('@/app/actions/ai')
+        const data = await generateOutlineAction({
+          sessionId,
+          churchId,
+          flowStructure,
+          verseNotes: notesForAI,
+          selectedInsights,
+        })
+
+        if (!data.error && data.blocks) {
+          setBlocks(data.blocks)
+        } else {
+          console.error('Outline generation failed:', data.error)
+        }
+      })()
+    }}
+    onViewPrompt={(selectedInsights) => {
+      const notesForAI: Record<string, string> = {}
+      for (const [vRef, notes] of Object.entries(verseNotes)) {
+        const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+        if (text) notesForAI[vRef] = text
+      }
+    
+      const parts = buildOutlinePromptParts({
+        flowStructure,
+        selectedInsights,
+        verseNotesForAI: notesForAI,
+        thoughts: [],
+        sessionEstimatedDuration: estimatedDuration,
+      })
+    
+      setHumanPromptPreview(
+        renderOutlinePromptForHuman({
+          session: {
+            title: sessionTitle,
+            type: 'Sermon',
+            scriptureRef: localScriptureRef,
+            notes: null,
+            estimatedDuration,
+          },
+          parts,
+          version: 'preview',
+        })
+      )
+    
+      // setLlmPromptPreview(
+      //   renderOutlinePromptForLLM({
+      //     session: {
+      //       title: sessionTitle,
+      //       type: 'Sermon',
+      //       scriptureRef: localScriptureRef,
+      //       notes: null,
+      //       estimatedDuration,
+      //     },
+      //     parts,
+      //     version: 'preview',
+      //   }).system +
+      //     '\n\n----- USER -----\n\n' +
+      //     renderOutlinePromptForLLM({
+      //       session: {
+      //         title: sessionTitle,
+      //         type: 'Sermon',
+      //         scriptureRef: localScriptureRef,
+      //         notes: null,
+      //         estimatedDuration,
+      //       },
+      //       parts,
+      //       version: 'preview',
+      //     }).user
+      // )
+
+      const llmPrompt = renderOutlinePromptForLLM({
+        session: {
+          title: sessionTitle,
+          type: 'Sermon',
+          scriptureRef: localScriptureRef,
+          notes: null,
+          estimatedDuration,
+        },
+        parts,
+        version: 'preview',
+      })
+      
+      setLlmPromptPreview(
+        `${llmPrompt.system}\n\n----- USER -----\n\n${llmPrompt.user}`
+      )
+    
+      setShowPromptPreviewModal(true)
+    }}
+    onClose={() => setShowDraftOutlineModal(false)}
+  />
+)}
+
+{showPromptPreviewModal && (
+  <PromptPreviewModal
+    humanPrompt={humanPromptPreview}
+    llmPrompt={llmPromptPreview}
+    onClose={() => setShowPromptPreviewModal(false)}
+  />
+)}
+
+
+      {showExport && (
+        <ExportModal
+          blocks={blocks}
+          sessionTitle={sessionTitle}
+          scriptureRef={scriptureRef}
+          scheduledDate={scheduledDate}
+          onClose={() => setShowExport(false)}
+          onBeforeExport={async () => {
+            await outlineSaveFn.current?.()
+          }}
+        />
+      )}
+
       {pending && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-          flex items-center gap-3 px-4 py-3
-          bg-violet-700 text-white text-sm font-medium rounded-2xl shadow-xl">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 bg-violet-700 text-white text-sm font-medium rounded-2xl shadow-xl">
           <span className="w-2 h-2 rounded-full bg-violet-300 animate-pulse shrink-0" />
           Tap a drop zone to place
-          <button onClick={() => setPending(null)}
-            className="ml-1 text-violet-300 hover:text-white transition-colors text-xs underline">
+          <button onClick={() => setPending(null)} className="ml-1 text-violet-300 hover:text-white transition-colors text-xs underline">
             Cancel
           </button>
         </div>
       )}
     </div>
-  )
-}
-
-function WorkspaceAssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview, onClose }: {
-  hasBlocks: boolean; aiLoading: boolean
-  onDraftOutline: () => void; onOutlineReview: () => void; onClose: () => void
-}) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  React.useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  return (
-    <div ref={ref} className="absolute left-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
-      <div className="p-1.5 space-y-0.5">
-        <button
-          onClick={onDraftOutline}
-          disabled={aiLoading}
-          className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-slate-50 transition-colors text-left disabled:opacity-40"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-slate-800">{hasBlocks ? 'Redraft AI Outline' : 'AI Outline'}</p>
-            <p className="text-xs text-slate-400 mt-0.5">AI builds an outline from your research &amp; notes</p>
-          </div>
-        </button>
-        <div className="h-px bg-slate-100" />
-        <button
-          onClick={onOutlineReview}
-          disabled={!hasBlocks}
-          className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-slate-50 transition-colors text-left disabled:opacity-40"
-        >
-          <BookOpen className="w-3.5 h-3.5 text-slate-500 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-slate-800">Review Outline</p>
-            <p className="text-xs text-slate-400 mt-0.5">AI reviews lesson flow, language &amp; structure</p>
-          </div>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function ModeButton({ active, icon, label, onClick }: {
-  active: boolean; icon: React.ReactNode; label: string; onClick: () => void
-}) {
-  return (
-    <button onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
-        active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-      }`}>
-      {icon}{label}
-    </button>
   )
 }

@@ -13,7 +13,6 @@ import Link from 'next/link'
 
 // CATEGORIES ordered by practical value for sermon prep. Stubs at end.
 const CATEGORIES: {
-
   category: ResearchCategory
   label: string
   icon: typeof BookText
@@ -47,21 +46,13 @@ export function ResearchWorkspace({
   const [generating, setGenerating] = useState<ResearchCategory | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-<<<<<<< HEAD
   const currentTab = CATEGORIES.find(t => t.category === activeTab)!
-=======
-  const currentTab = TABS.find(t => t.category === activeTab)!
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   const tabItems = items.filter(item => item.category === activeTab && !item.is_dismissed)
   const hasItems = tabItems.length > 0
   const isGeneratingThis = generating === activeTab
 
   // Derive counts once per render — no useCallback needed, items ref changes anyway
-<<<<<<< HEAD
   const categoryCounts = CATEGORIES.reduce<Record<string, number>>((acc, tab) => {
-=======
-  const categoryCounts = TABS.reduce<Record<string, number>>((acc, tab) => {
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     acc[tab.category] = items.filter(i => i.category === tab.category && !i.is_dismissed).length
     return acc
   }, {})
@@ -149,7 +140,6 @@ export function ResearchWorkspace({
       {/* Tab bar — scrollable on mobile */}
       <div className="flex items-center gap-1 overflow-x-auto pb-1 mb-5 -mx-1 px-1 scrollbar-none">
         {CATEGORIES.map(tab => {
-
           const count = categoryCounts[tab.category] ?? 0
           const Icon = tab.icon
           return (

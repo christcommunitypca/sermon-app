@@ -4,10 +4,10 @@
 // Scripture spans full width; notes and AI research sit below in two columns.
 // Words can be selected directly from the Scripture text for pericope word study.
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
-  ChevronDown, ChevronRight, Sparkles, Loader2, Check,
-  Plus, X, AlertCircle, ArrowUp, ArrowDown, Trash2,
+  ChevronDown, Sparkles, Loader2, Check,
+  Plus, X, AlertCircle, ArrowUp, ArrowDown, Trash2, Wand2,
 } from 'lucide-react'
 import type { VerseData, SectionHeader } from '@/lib/esv'
 import type { VerseNote } from '@/types/database'
@@ -18,6 +18,7 @@ import {
   updateVerseNoteAction,
   deleteVerseNoteAction,
   reorderVerseNotesAction,
+  splitVerseNotesAction,
 } from '@/app/actions/verse-study'
 import { toggleInsightFlagAction } from '@/app/actions/verse-study'
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,6 +45,9 @@ const CATEGORIES = [
 ] as const
 type CategoryKey = typeof CATEGORIES[number]['key']
 
+type PaneKey = 'scripture' | 'notes' | 'research'
+
+
 interface Props {
   sessionId: string
   churchId: string
@@ -59,6 +63,10 @@ interface Props {
   onSetupCompleteChange: (complete: boolean) => void
   pending: { id: string; content: string; type: string; source: string } | null
   onItemPlaced: (item: { id: string; content: string; type: string; source: string }) => void
+  focusMode: boolean
+  activeSectionIdx: number
+  onActiveSectionChange: (idx: number) => void
+  paneVisibility: { scripture: boolean; notes: boolean; research: boolean }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,6 +121,9 @@ const STOP_WORDS = new Set([
   'before', 'because', 'through', 'under', 'again', 'also', 'about',
   'each', 'such', 'only', 'once', 'well', 'some', 'many', 'much'
 ])
+
+
+const SCRIPTURE_FONT_SIZES = [14, 15, 16, 18, 20, 22] as const
 
 const THEOLOGY_KEYWORDS = new Set([
   'covenant', 'promise', 'promised', 'blessing', 'bless', 'seed', 'offspring',
@@ -205,7 +216,7 @@ function toggleSelectedWord(
 
   return {
     ...current,
-    [sectionKey]: [...existing, word].slice(0, 8),
+    [sectionKey]: [...existing, word].slice(0, 16),
   }
 }
 
@@ -264,23 +275,98 @@ export function PericopePanel({
   onSetupCompleteChange,
   pending,
   onItemPlaced,
+  focusMode,
+  activeSectionIdx,
+  onActiveSectionChange,
+  paneVisibility,
 }: Props) {
-  const [expanded,   setExpanded]   = useState<Record<number, boolean>>({ 0: true })
-  const [activeTab,  setActiveTab]  = useState<Record<number, CategoryKey>>({})
-  const [generating, setGenerating] = useState<Record<number, boolean>>({})
-  const [errors,     setErrors]     = useState<Record<number, string>>({})
-  const [editMode,   setEditMode]   = useState(false)
+  const [activeCategoryBySection, setActiveCategoryBySection] = useState<Record<string, CategoryKey>>({})
+  const [mobileTabBySection, setMobileTabBySection] = useState<Record<string, 'scripture' | 'notes' | 'research'>>({})
+  const [generatingBySection, setGeneratingBySection] = useState<Record<string, boolean>>({})
+  const [organizingBySection, setOrganizingBySection] = useState<Record<string, boolean>>({})
+  const [error, setError] = useState<string | null>(null)
   const [selectedWordsBySection, setSelectedWordsBySection] = useState<Record<string, string[]>>({})
-  const [showSuggestionsBySection, setShowSuggestionsBySection] = useState<Record<string, boolean>>({})
-
+  const [showWordToolsBySection, setShowWordToolsBySection] = useState<Record<string, boolean>>({})
+  const [composerBySection, setComposerBySection] = useState<Record<string, string>>({})
+  const [creatingBySection, setCreatingBySection] = useState<Record<string, boolean>>({})
   const [noteSaveStates, setNoteSaveStates] = useState<Record<string, SaveState>>({})
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
-  const [addingNote, setAddingNote] = useState<Record<string, boolean>>({})
-  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({})
+  const [titleSavingBySection, setTitleSavingBySection] = useState<Record<string, boolean>>({})
+  const [scriptureFontIdx, setScriptureFontIdx] = useState(2)
+  const [paneWidths, setPaneWidths] = useState<Record<PaneKey, number>>({
+    scripture: 34,
+    notes: 30,
+    research: 36,
+  })
+  const dragRef = useRef<{ left: PaneKey; right: PaneKey; startX: number; startLeft: number; startRight: number } | null>(null)
 
-  const toggleSection = useCallback((i: number) => {
-    setExpanded(p => ({ ...p, [i]: !p[i] }))
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const blocks = useMemo(() => sections.map((section, idx) => ({
+    section,
+    idx,
+    sectionKey: sectionNoteRef(section.startVerse),
+    verses: versesForSection(verses, sections, idx),
+  })), [sections, verses])
+
+  const activeBlock = blocks[activeSectionIdx] ?? null
+  const activeSectionKey = activeBlock?.sectionKey ?? ''
+  const visibleBlocks = activeBlock ? [activeBlock] : []
+  useEffect(() => {
+    const raw = localStorage.getItem('teaching-pane-widths')
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed?.scripture && parsed?.notes && parsed?.research) {
+          setPaneWidths(parsed)
+        }
+      } catch {}
+    }
   }, [])
+
+  
+  useEffect(() => {
+    localStorage.setItem('teaching-pane-widths', JSON.stringify(paneWidths))
+  }, [paneWidths])
+  
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragRef.current) return
+      const { left, right, startX, startLeft, startRight } = dragRef.current
+      const delta = (e.clientX - startX) / 12
+      const nextLeft = Math.max(15, startLeft + delta)
+      const nextRight = Math.max(15, startRight - delta)
+      if (nextLeft + nextRight < 30) return
+  
+      setPaneWidths(prev => ({
+        ...prev,
+        [left]: nextLeft,
+        [right]: nextRight,
+      }))
+    }
+  
+    function onUp() {
+      dragRef.current = null
+    }
+  
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+
+  useEffect(() => {
+    setTitleDrafts(prev => {
+      const next = { ...prev }
+      for (const block of blocks) {
+        if (!next[block.sectionKey]) next[block.sectionKey] = block.section.label
+      }
+      return next
+    })
+  }, [blocks])
 
   useEffect(() => {
     return () => {
@@ -288,40 +374,30 @@ export function PericopePanel({
     }
   }, [])
 
-  function getSectionInsights(sectionKey: string, cat: CategoryKey): InsightItem[] {
-    return insights[sectionKey]?.[cat] ?? []
-  }
-
-  function hasSectionResearch(sectionKey: string): boolean {
+  function sectionHasResearch(sectionKey: string) {
     return Object.values(insights[sectionKey] ?? {}).some(items => items.length > 0)
   }
 
-  async function handleGenerate(idx: number) {
-    const section = sections[idx]
-    const sectionVerses = versesForSection(verses, sections, idx)
-    if (!sectionVerses.length) return
-
-    const sectionKey = sectionNoteRef(section.startVerse)
-    const selectedWords = selectedWordsBySection[sectionKey] ?? []
-
-    setGenerating(p => ({ ...p, [idx]: true }))
-    setErrors(p => ({ ...p, [idx]: '' }))
+  async function handleGenerateForSection(block: (typeof blocks)[number]) {
+    const sectionKey = block.sectionKey
+    setGeneratingBySection(prev => ({ ...prev, [sectionKey]: true }))
+    setError(null)
 
     const result = await generatePericopeInsightsAction(
       sessionId,
       churchId,
       {
-        label: section.label,
-        startVerse: section.startVerse,
-        verses: sectionVerses,
+        label: titleDrafts[sectionKey] || block.section.label,
+        startVerse: block.section.startVerse,
+        verses: block.verses,
       },
-      selectedWords
+      (selectedWordsBySection[sectionKey] ?? []).slice(0, 5),
     )
 
-    setGenerating(p => ({ ...p, [idx]: false }))
+    setGeneratingBySection(prev => ({ ...prev, [sectionKey]: false }))
 
     if (result.error) {
-      setErrors(p => ({ ...p, [idx]: result.error! }))
+      setError(result.error)
       return
     }
 
@@ -335,32 +411,60 @@ export function PericopePanel({
       })
     }
 
-    setExpanded(p => ({ ...p, [idx]: true }))
-    setActiveTab(p => ({ ...p, [idx]: 'context' }))
+    onActiveSectionChange(block.idx)
+    setMobileTabBySection(prev => ({ ...prev, [sectionKey]: 'research' }))
+    setActiveCategoryBySection(prev => ({ ...prev, [sectionKey]: 'context' }))
   }
 
-  async function handleAddNote(noteRef: string) {
-    setAddingNote(prev => ({ ...prev, [noteRef]: true }))
-    const result = await createVerseNoteAction(sessionId, churchId, noteRef, '')
-    setAddingNote(prev => ({ ...prev, [noteRef]: false }))
+  async function handleSaveTitle(block: (typeof blocks)[number]) {
+    const sectionKey = block.sectionKey
+    const nextLabel = (titleDrafts[sectionKey] ?? '').trim() || block.section.label
+    if (nextLabel === block.section.label) return
+
+    const nextSections = sections.map((section, idx) =>
+      idx === block.idx ? { ...section, label: nextLabel } : section
+    )
+
+    setTitleSavingBySection(prev => ({ ...prev, [sectionKey]: true }))
+    const result = await savePericopeSectionsAction(
+      sessionId,
+      nextSections.map(section => ({ label: section.label, startVerse: section.startVerse }))
+    )
+    setTitleSavingBySection(prev => ({ ...prev, [sectionKey]: false }))
+
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    onSectionsChange(nextSections)
+  }
+
+  async function handleCreateNote(sectionKey?: string) {
+    const key = sectionKey ?? activeSectionKey
+    if (!key) return
+    const content = (composerBySection[key] ?? '').trim()
+    if (!content) return
+
+    setCreatingBySection(prev => ({ ...prev, [key]: true }))
+    const result = await createVerseNoteAction(sessionId, churchId, key, content)
+    setCreatingBySection(prev => ({ ...prev, [key]: false }))
     if (result.error || !result.note) return
 
     onVerseNotesChange({
       ...verseNotes,
-      [noteRef]: [...(verseNotes[noteRef] ?? []), result.note],
+      [key]: [...(verseNotes[key] ?? []), result.note],
     })
+    setComposerBySection(prev => ({ ...prev, [key]: '' }))
   }
 
   function handleNoteChange(noteId: string, value: string) {
     setNoteDrafts(prev => ({ ...prev, [noteId]: value }))
     setNoteSaveStates(prev => ({ ...prev, [noteId]: 'saving' }))
-
     if (saveTimers.current[noteId]) clearTimeout(saveTimers.current[noteId])
 
     saveTimers.current[noteId] = setTimeout(async () => {
       const result = await updateVerseNoteAction(noteId, value)
       setNoteSaveStates(prev => ({ ...prev, [noteId]: result.error ? 'error' : 'saved' }))
-
       onVerseNotesChange(
         Object.fromEntries(
           Object.entries(verseNotes).map(([key, notes]) => [
@@ -369,25 +473,23 @@ export function PericopePanel({
           ])
         )
       )
-
       if (!result.error) {
         setTimeout(() => setNoteSaveStates(prev => ({ ...prev, [noteId]: 'idle' })), 1800)
       }
     }, 700)
   }
 
-  async function handleDeleteNote(noteRef: string, noteId: string) {
+  async function handleDeleteNote(sectionKey: string, noteId: string) {
     const result = await deleteVerseNoteAction(noteId)
     if (result.error) return
-
     onVerseNotesChange({
       ...verseNotes,
-      [noteRef]: (verseNotes[noteRef] ?? []).filter(n => n.id !== noteId),
+      [sectionKey]: (verseNotes[sectionKey] ?? []).filter(n => n.id !== noteId),
     })
   }
 
-  async function handleMoveNote(noteRef: string, noteId: string, direction: 'up' | 'down') {
-    const notes = [...(verseNotes[noteRef] ?? [])]
+  async function handleMoveNote(sectionKey: string, noteId: string, direction: 'up' | 'down') {
+    const notes = [...(verseNotes[sectionKey] ?? [])]
     const idx = notes.findIndex(n => n.id === noteId)
     if (idx === -1) return
     if (direction === 'up' && idx === 0) return
@@ -395,13 +497,26 @@ export function PericopePanel({
 
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
     ;[notes[idx], notes[swapIdx]] = [notes[swapIdx], notes[idx]]
-
-    onVerseNotesChange({ ...verseNotes, [noteRef]: notes })
+    onVerseNotesChange({ ...verseNotes, [sectionKey]: notes })
     await reorderVerseNotesAction(notes.map(n => n.id))
   }
 
-  // ── Section setup editor ───────────────────────────────────────────────────
-  const showSetupEditor = !setupComplete || editMode
+  async function handleOrganizeSectionNotes(sectionKey: string) {
+    const ids = (verseNotes[sectionKey] ?? []).map(note => note.id)
+    if (!ids.length) return
+
+    setOrganizingBySection(prev => ({ ...prev, [sectionKey]: true }))
+    const result = await splitVerseNotesAction(sessionId, churchId, ids)
+    setOrganizingBySection(prev => ({ ...prev, [sectionKey]: false }))
+
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    onVerseNotesChange(result.verseNotes)
+  }
+
+  const showSetupEditor = !setupComplete
   if (showSetupEditor) {
     return (
       <ManualSectionEditor
@@ -412,370 +527,364 @@ export function PericopePanel({
           await savePericopeSectionsAction(sessionId, sects)
           onSectionsChange(sects)
           onSetupCompleteChange(true)
-          setEditMode(false)
         }}
-        onCancel={setupComplete ? () => setEditMode(false) : undefined}
       />
     )
   }
 
-  return (
-    <div className="flex flex-col gap-3 min-h-0">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-400 font-medium">{sections.length} sections</span>
-        <button
-          onClick={() => setEditMode(v => !v)}
-          className="text-[11px] text-slate-400 hover:text-slate-700 underline"
-        >
-          {editMode ? 'Cancel' : 'Adjust sections'}
-        </button>
-      </div>
+  if (!activeBlock) return null
 
-      <div className="flex flex-col gap-2 overflow-y-auto min-h-0">
-        {sections.map((section, idx) => {
-          const sectionVerses = versesForSection(verses, sections, idx)
-          const rangeLabel    = verseRangeLabel(sectionVerses)
-          const isExpanded    = expanded[idx] ?? false
-          const cat           = activeTab[idx] ?? 'context'
-          const isGenerating  = generating[idx] ?? false
-          const sectionKey    = sectionNoteRef(section.startVerse)
-          const hasResearch   = hasSectionResearch(sectionKey)
-          const items         = getSectionInsights(sectionKey, cat)
-          const errorMsg      = errors[idx]
-          const noteRef       = sectionKey
-          const notes         = verseNotes[noteRef] ?? []
-          const wordCandidates = buildWordStudySuggestions(sectionVerses)
-          const selectedWords = selectedWordsBySection[sectionKey] ?? []
-          const showSuggestions = showSuggestionsBySection[sectionKey] ?? false
+  function renderScripturePane(block: (typeof blocks)[number]) {
+    const words = selectedWordsBySection[block.sectionKey] ?? []
+    const fontSize = SCRIPTURE_FONT_SIZES[scriptureFontIdx] ?? 16
+    const lineHeight = Math.max(fontSize + 14, 28)
+    return (
+      <div className="space-y-2">
+        {block.verses.map(v => (
+          <p key={v.verse_ref} className="text-slate-700" style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px` }}>
+            <span className="text-xs font-bold text-slate-400 mr-1">{v.verse_ref}</span>
+            {renderSelectableVerseText(v.text, words, (word) => {
+              onActiveSectionChange(block.idx)
+              setSelectedWordsBySection(prev => toggleSelectedWord(prev, block.sectionKey, word))
+            })}
+          </p>
+        ))}
+      </div>
+    )
+  }
+
+
+  function renderNotesPane(block: (typeof blocks)[number]) {
+    const sectionKey = block.sectionKey
+    const notes = verseNotes[sectionKey] ?? []
+    const composerValue = composerBySection[sectionKey] ?? ''
+
+    return (
+      <div className="space-y-3 h-full flex flex-col min-h-0">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <AutoResizeTextarea
+            value={composerValue}
+            onChange={val => setComposerBySection(prev => ({ ...prev, [sectionKey]: val }))}
+            placeholder="Type your thoughts..."
+            className="w-full text-sm text-slate-700 bg-transparent resize-none focus:outline-none placeholder:text-slate-400 leading-relaxed min-h-[90px]"
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter' && e.shiftKey) {
+                e.preventDefault()
+                await handleCreateNote(sectionKey)
+              }
+            }}
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-slate-400">Click Shift + Enter to save</span>
+            <button
+              type="button"
+              onClick={() => handleCreateNote(sectionKey)}
+              disabled={creatingBySection[sectionKey] || !composerValue.trim()}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:opacity-50"
+            >
+              {creatingBySection[sectionKey] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Save
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+          {notes.length === 0 ? (
+            <p className="text-sm text-slate-400">No notes yet for this section.</p>
+          ) : (
+            notes.map((note, noteIdx) => {
+              const draft = noteDrafts[note.id] ?? note.content
+              const saveState = noteSaveStates[note.id] ?? 'idle'
+              const isPending = pending?.id === note.id
+
+              return (
+                <div key={note.id} className="group rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-start gap-2">
+                    <div className="flex flex-col items-center gap-0.5 mt-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => handleMoveNote(sectionKey, note.id, 'up')} disabled={noteIdx === 0} className="p-0.5 rounded text-slate-300 hover:text-slate-600 disabled:opacity-20 transition-colors"><ArrowUp className="w-3 h-3" /></button>
+                      <button onClick={() => handleMoveNote(sectionKey, note.id, 'down')} disabled={noteIdx === notes.length - 1} className="p-0.5 rounded text-slate-300 hover:text-slate-600 disabled:opacity-20 transition-colors"><ArrowDown className="w-3 h-3" /></button>
+                    </div>
+
+                    <AutoResizeTextarea
+                      value={draft}
+                      onChange={val => handleNoteChange(note.id, val)}
+                      placeholder="Type your thoughts..."
+                      className="flex-1 text-sm text-slate-700 bg-transparent resize-none focus:outline-none placeholder:text-slate-300 leading-relaxed min-h-[40px]"
+                    />
+
+                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                      <button
+                        onClick={() => onItemPlaced({ id: note.id, content: draft.trim() || note.content, type: 'sub_point', source: 'note' })}
+                        className={`p-1 rounded transition-colors ${isPending ? 'text-violet-600 bg-violet-100' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}
+                        title="Place in outline"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      {saveState === 'saving' && <Loader2 className="w-3 h-3 text-slate-300 animate-spin" />}
+                      {saveState === 'saved' && <Check className="w-3 h-3 text-emerald-500" strokeWidth={2.5} />}
+                      {saveState === 'error' && <AlertCircle className="w-3 h-3 text-red-400" />}
+                      <button onClick={() => handleDeleteNote(sectionKey, note.id)} className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderResearchPane(block: (typeof blocks)[number]) {
+    const sectionKey = block.sectionKey
+    const category = activeCategoryBySection[sectionKey] ?? 'context'
+    const items = insights[sectionKey]?.[category] ?? []
+    const selectedWords = selectedWordsBySection[sectionKey] ?? []
+    const displayWords = selectedWords.slice(0, 5)
+    const showWordTools = showWordToolsBySection[sectionKey] ?? false
+    const hasResearch = sectionHasResearch(sectionKey)
+    const wordCandidates = buildWordStudySuggestions(block.verses)
+
+    return (
+      <div className="space-y-3 h-full flex flex-col min-h-0">
+        {!hasResearch && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-700">AI word study</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Select up to five words from the Scripture to tell AI which words to study.</p>
+                {displayWords.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {displayWords.map(word => (
+                      <span key={word} className="px-2 py-1 rounded-full text-[11px] border bg-violet-100 border-violet-300 text-violet-700">
+                        {word}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWordToolsBySection(prev => ({ ...prev, [sectionKey]: !showWordTools }))}
+                className="text-[11px] text-violet-600 hover:text-violet-800 shrink-0"
+              >
+                {showWordTools ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showWordTools && (
+              <div className="mt-2 pt-2 border-t border-slate-200">
+                <p className="text-xs font-semibold text-slate-700">Suggested Words</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 mb-2">Select words to add them to AI word study.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {wordCandidates.map(word => {
+                    const selected = selectedWords.some(w => normalizeStudyWord(w) === normalizeStudyWord(word))
+                    return (
+                      <button
+                        key={word}
+                        type="button"
+                        onClick={() => setSelectedWordsBySection(prev => toggleSelectedWord(prev, sectionKey, word))}
+                        className={`px-2 py-1 rounded-full text-[11px] border transition-colors ${selected ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}
+                      >
+                        {word}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 flex-wrap">
+          {CATEGORIES.map(c => {
+            const catItems = insights[sectionKey]?.[c.key] ?? []
+            const isActive = category === c.key
+            return (
+              <button
+                key={c.key}
+                onClick={() => setActiveCategoryBySection(prev => ({ ...prev, [sectionKey]: c.key }))}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${isActive ? 'bg-slate-900 text-white' : catItems.length ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'text-slate-300'}`}
+              >
+                {c.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+          {generatingBySection[sectionKey] ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" />Generating research for this section…</div>
+          ) : items.length === 0 ? (
+            <p className="text-sm text-slate-400">{hasResearch ? 'No items in this category yet.' : 'Generate AI for this section when you are ready.'}</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {items.map((item, i) => (
+                <ResearchItem
+                  key={i}
+                  item={item}
+                  pending={pending}
+                  allowPlace={false}
+                  selectable
+                  onToggleFlag={(newFlagged) => {
+                    onInsightsChange({
+                      ...insights,
+                      [sectionKey]: {
+                        ...(insights[sectionKey] ?? {}),
+                        [category]: (insights[sectionKey]?.[category] ?? []).map((it, itemIdx) => itemIdx === i ? { ...it, is_flagged: newFlagged } : it),
+                      },
+                    })
+                    toggleInsightFlagAction(sessionId, sectionKey, category, i, newFlagged).catch(() => null)
+                  }}
+                  onPlace={() => {
+                    const content = item.title ? `${item.title} — ${item.content}` : item.content
+                    onItemPlaced({
+                      id: `${sectionKey}-${category}-${i}`,
+                      content,
+                      type: category === 'application' ? 'application' : category === 'practical' ? 'illustration' : 'sub_point',
+                      source: 'research',
+                    })
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function visibleDesktopPanes(): PaneKey[] {
+    return (['scripture', 'notes', 'research'] as PaneKey[]).filter(p => paneVisibility[p])
+  }
+  
+  function desktopGridTemplate() {
+    const panes = visibleDesktopPanes()
+    if (panes.length === 0) return 'minmax(0,1fr)'
+    const total = panes.reduce((sum, pane) => sum + paneWidths[pane], 0)
+    return panes.map(pane => `minmax(260px, ${paneWidths[pane] / total}fr)`).join(' ')
+  }
+  
+  function startResize(left: PaneKey, right: PaneKey, clientX: number) {
+    dragRef.current = {
+      left,
+      right,
+      startX: clientX,
+      startLeft: paneWidths[left],
+      startRight: paneWidths[right],
+    }
+  }
+  return (
+    <div className="flex flex-col gap-3 min-h-0 flex-1">
+      {error && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0">
+        {visibleBlocks.map(block => {
+          const sectionKey = block.sectionKey
+          const mobileTab = mobileTabBySection[sectionKey] ?? 'scripture'
+          const hasResearch = sectionHasResearch(sectionKey)
+          const notes = verseNotes[sectionKey] ?? []
+          const workingHeight = focusMode ? 'h-[calc(100vh-7.5rem)]' : 'h-[calc(100vh-13rem)]'
 
           return (
-            <div key={`${section.startVerse}-${idx}`} className="border border-slate-200 rounded-xl overflow-hidden">
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => toggleSection(idx)}
-              >
-                {isExpanded
-                  ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-800 truncate">{section.label}</p>
-                  <p className="text-[11px] text-slate-400">{rangeLabel}</p>
+            <div key={sectionKey} className={`rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col min-h-0 ${workingHeight}`}>
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-100">
+                <div className="shrink-0 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setScriptureFontIdx(idx => Math.max(0, idx - 1))}
+                    disabled={scriptureFontIdx === 0}
+                    className={`h-7 w-7 rounded-lg border text-slate-500 transition-colors ${scriptureFontIdx === 0 ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 hover:bg-slate-50 hover:text-slate-700'}`}
+                    title="Smaller scripture text"
+                  >
+                    <span className="text-[11px] font-semibold leading-none">A</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScriptureFontIdx(idx => Math.min(SCRIPTURE_FONT_SIZES.length - 1, idx + 1))}
+                    disabled={scriptureFontIdx === SCRIPTURE_FONT_SIZES.length - 1}
+                    className={`h-7 w-7 rounded-lg border text-slate-500 transition-colors ${scriptureFontIdx === SCRIPTURE_FONT_SIZES.length - 1 ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 hover:bg-slate-50 hover:text-slate-700'}`}
+                    title="Larger scripture text"
+                  >
+                    <span className="text-[15px] font-semibold leading-none">A</span>
+                  </button>
                 </div>
-                {notes.some(n => n.content.trim()) && (
-                  <span className="text-[10px] text-slate-400 shrink-0">{notes.length} note{notes.length !== 1 ? 's' : ''}</span>
+                <input
+                  value={titleDrafts[sectionKey] ?? block.section.label}
+                  onChange={e => setTitleDrafts(prev => ({ ...prev, [sectionKey]: e.target.value }))}
+                  onBlur={() => handleSaveTitle(block)}
+                  className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-slate-800 focus:outline-none"
+                />
+                {notes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleOrganizeSectionNotes(sectionKey)}
+                    disabled={organizingBySection[sectionKey]}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-violet-200 text-violet-700 text-[11px] hover:bg-violet-50 disabled:opacity-50 shrink-0"
+                  >
+                    {organizingBySection[sectionKey] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                    Organize notes
+                  </button>
                 )}
-                {hasResearch && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" title="Research generated" />
-                )}
+                {titleSavingBySection[sectionKey] && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300" />}
                 <button
-                  onClick={e => { e.stopPropagation(); handleGenerate(idx) }}
-                  disabled={isGenerating}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors shrink-0 ${
-                    hasResearch
-                      ? 'text-slate-400 hover:text-violet-600 hover:bg-violet-50'
-                      : 'bg-violet-50 text-violet-600 hover:bg-violet-100'
-                  }`}
+                  onClick={() => !hasResearch && handleGenerateForSection(block)}
+                  disabled={hasResearch || generatingBySection[sectionKey]}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors shrink-0 ${hasResearch ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-violet-700 hover:bg-violet-50 border border-violet-200'}`}
                 >
-                  {isGenerating
-                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                    : <Sparkles className="w-3 h-3" />}
-                  {isGenerating ? 'Generating…' : hasResearch ? 'Regen' : 'Generate'}
+                  {generatingBySection[sectionKey] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  {generatingBySection[sectionKey] ? 'Generating…' : hasResearch ? 'AI ready' : 'Generate AI'}
                 </button>
               </div>
 
-              {isExpanded && (
-                <div className="px-3 pb-3 pt-2">
-                  {errorMsg && (
-                    <div className="flex items-center gap-2 px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg mb-3 text-xs text-red-700">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      {errorMsg}
-                    </div>
-                  )}
+              <div className="md:hidden px-3 pt-3">
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+                  {(['scripture', 'notes', 'research'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => { onActiveSectionChange(block.idx); setMobileTabBySection(prev => ({ ...prev, [sectionKey]: tab })) }}
+                      className={`flex-1 px-2.5 py-1.5 rounded-lg text-xs font-medium capitalize ${mobileTab === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                    >
+                      {tab === 'research' ? 'AI' : tab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+<div
+  className="hidden md:grid flex-1 min-h-0 relative"
+  style={{ gridTemplateColumns: desktopGridTemplate() }}
+>
+  {visibleDesktopPanes().map((pane, idx, arr) => (
+    <div key={pane} className="relative min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 p-4 overflow-y-auto">
+        {pane === 'scripture' && renderScripturePane(block)}
+        {pane === 'notes' && renderNotesPane(block)}
+        {pane === 'research' && renderResearchPane(block)}
+      </div>
 
-                  {/* Scripture full width */}
-                  <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-amber-100">
-                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                        Scripture
-                      </span>
-                      {selectedWords.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedWordsBySection(prev => ({ ...prev, [sectionKey]: [] }))}
-                          className="text-[11px] text-slate-400 hover:text-slate-700"
-                        >
-                          Clear selected words
-                        </button>
-                      )}
-                    </div>
-                    <div className="px-3 py-2">
-                      {sectionVerses.map(v => (
-                        <p key={v.verse_ref} className="text-sm text-slate-700 leading-7">
-                          <span className="text-xs font-bold text-slate-400 mr-1">{v.verse_ref}</span>
-                          {renderSelectableVerseText(v.text, selectedWords, (word) =>
-  setSelectedWordsBySection(prev => toggleSelectedWord(prev, sectionKey, word))
-)}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Notes + AI below */}
-                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    {/* Notes: left 1/3 */}
-                    <div className="xl:col-span-1">
-                      <div className="rounded-xl border border-slate-200 bg-white h-full">
-                        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</span>
-                          <button
-                            onClick={() => handleAddNote(noteRef)}
-                            disabled={addingNote[noteRef]}
-                            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700 transition-colors disabled:opacity-50"
-                          >
-                            {addingNote[noteRef]
-                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              : <Plus className="w-3.5 h-3.5" />}
-                            Add note
-                          </button>
-                        </div>
-
-                        <div className="p-3 space-y-2">
-                          {notes.length === 0 ? (
-                            <p className="text-xs text-slate-300">Add your observations for this section here.</p>
-                          ) : notes.map((note, noteIdx) => {
-                            const draft = noteDrafts[note.id] ?? note.content
-                            const saveState = noteSaveStates[note.id] ?? 'idle'
-                            const isPending = pending?.id === note.id
-
-                            return (
-                              <div key={note.id} className="group relative">
-                                <div className={`flex items-start gap-2 p-2.5 rounded-xl border transition-colors ${
-                                  saveState === 'error'
-                                    ? 'border-red-200 bg-red-50'
-                                    : 'border-slate-100 bg-slate-50 focus-within:border-slate-300 focus-within:bg-white'
-                                }`}>
-                              <div className="flex flex-col items-center gap-0.5 mt-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-  <button
-    onClick={() => handleMoveNote(noteRef, note.id, 'up')}
-    disabled={noteIdx === 0}
-    className="p-0.5 rounded text-slate-300 hover:text-slate-600 disabled:opacity-20 transition-colors"
-  >
-    <ArrowUp className="w-3 h-3" />
-  </button>
-  <button
-    onClick={() => handleMoveNote(noteRef, note.id, 'down')}
-    disabled={noteIdx === notes.length - 1}
-    className="p-0.5 rounded text-slate-300 hover:text-slate-600 disabled:opacity-20 transition-colors"
-  >
-    <ArrowDown className="w-3 h-3" />
-  </button>
-
-  {note.used_count > 0 && (
-    <span className="mt-1 text-[10px] font-semibold px-1.5 py-0.5 bg-violet-100 text-violet-600 rounded-full">
-      {note.used_count}×
-    </span>
-  )}
+      {idx < arr.length - 1 && (
+        <div
+          onMouseDown={(e) => startResize(pane, arr[idx + 1], e.clientX)}
+          className="absolute top-0 right-0 h-full w-2 cursor-col-resize group z-10"
+          title="Resize panes"
+        >
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-slate-200 group-hover:bg-violet-300" />
+        </div>
+      )}
+    </div>
+  ))}
 </div>
 
-                                  <AutoResizeTextarea
-                                    value={draft}
-                                    onChange={val => handleNoteChange(note.id, val)}
-                                    placeholder="Write your observation…"
-                                    className="flex-1 text-sm text-slate-700 bg-transparent resize-none focus:outline-none placeholder:text-slate-300 leading-relaxed min-h-[40px]"
-                                  />
-
-                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                                    <button
-                                      onClick={() => onItemPlaced({
-                                        id: note.id,
-                                        content: draft.trim() || note.content,
-                                        type: 'sub_point',
-                                        source: 'note',
-                                      })}
-                                      className={`p-1 rounded transition-colors ${
-                                        isPending ? 'text-violet-600 bg-violet-100' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'
-                                      }`}
-                                      title="Place in outline"
-                                    >
-                                      <Plus className="w-3.5 h-3.5" />
-                                    </button>
-
-                                    {saveState === 'saving' && <Loader2 className="w-3 h-3 text-slate-300 animate-spin" />}
-                                    {saveState === 'saved' && <Check className="w-3 h-3 text-emerald-500" strokeWidth={2.5} />}
-                                    {saveState === 'error' && <AlertCircle className="w-3 h-3 text-red-400" />}
-
-                                    <button
-                                      onClick={() => handleDeleteNote(noteRef, note.id)}
-                                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* AI Research: right 2/3 */}
-                    <div className="xl:col-span-2">
-                      <div className="rounded-xl border border-slate-200 bg-white h-full">
-                        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">AI Research</span>
-                          {!hasResearch && !isGenerating && (
-                            <span className="text-[11px] text-slate-300">Not generated yet</span>
-                          )}
-                        </div>
-
-                        <div className="p-3">
-                          <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                                Word Study Focus
-                              </span>
-                              <div className="flex items-center gap-2">
-                                {selectedWords.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedWordsBySection(prev => ({ ...prev, [sectionKey]: [] }))}
-                                    className="text-[11px] text-slate-400 hover:text-slate-700"
-                                  >
-                                    Clear
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setShowSuggestionsBySection(prev => ({ ...prev, [sectionKey]: !showSuggestions }))}
-                                  className="text-[11px] text-violet-600 hover:text-violet-800"
-                                >
-                                  {showSuggestions ? 'Hide suggestions' : 'Suggested words'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {selectedWords.length > 0 ? (
-                              <div className="flex flex-wrap gap-1.5 mb-2">
-                                {selectedWords.map(word => (
-                                  <button
-                                    key={word}
-                                    type="button"
-                                    onClick={() => setSelectedWordsBySection(prev => toggleSelectedWord(prev, sectionKey, word))}
-                                    className="px-2 py-1 rounded-full text-[11px] border bg-violet-100 border-violet-300 text-violet-700"
-                                  >
-                                    {word}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-slate-300 mb-2">
-                                Click words directly in the Scripture text above to focus the word study.
-                              </p>
-                            )}
-
-                            {showSuggestions && (
-                              <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-200">
-                                {wordCandidates.length === 0 ? (
-                                  <p className="text-xs text-slate-300">No strong suggestions detected for this section.</p>
-                                ) : wordCandidates.map(word => {
-                                  const selected = selectedWords.some(w => normalizeStudyWord(w) === normalizeStudyWord(word))
-                                  return (
-                                    <button
-                                      key={word}
-                                      type="button"
-                                      onClick={() => setSelectedWordsBySection(prev => toggleSelectedWord(prev, sectionKey, word))}
-                                      className={`px-2 py-1 rounded-full text-[11px] border transition-colors ${
-                                        selected
-                                          ? 'bg-violet-100 border-violet-300 text-violet-700'
-                                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'
-                                      }`}
-                                    >
-                                      {word}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1 flex-wrap mb-3">
-                            {CATEGORIES.map(c => {
-                              const catItems = getSectionInsights(sectionKey, c.key)
-                              const isActive = cat === c.key
-                              return (
-                                <button
-                                  key={c.key}
-                                  onClick={() => setActiveTab(p => ({ ...p, [idx]: c.key }))}
-                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors ${
-                                    isActive
-                                      ? 'bg-slate-900 text-white'
-                                      : catItems.length
-                                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                        : 'text-slate-300'
-                                  }`}
-                                >
-                                  {c.label}
-                                  {catItems.length > 0 && (
-                                    <span className={`ml-1 text-[10px] ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>
-                                      {catItems.length}
-                                    </span>
-                                  )}
-                                </button>
-                              )
-                            })}
-                          </div>
-
-                          {isGenerating ? (
-                            <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              Generating research for this section…
-                            </div>
-                          ) : items.length === 0 ? (
-                            <p className="text-xs text-slate-300 py-2">
-                              Generate research for this section when your notes are ready.
-                            </p>
-                          ) : (
-                            <div className="flex flex-col gap-2">
-   {items.map((item, i) => (
-  <ResearchItem
-    key={i}
-    item={item}
-    pending={pending}
-    allowPlace={false}
-    selectable
-    onToggleFlag={(newFlagged) => {
-      onInsightsChange({
-        ...insights,
-        [sectionKey]: {
-          ...(insights[sectionKey] ?? {}),
-          [cat]: (insights[sectionKey]?.[cat] ?? []).map((it, idx) =>
-            idx === i ? { ...it, is_flagged: newFlagged } : it
-          ),
-        },
-      })
-
-      toggleInsightFlagAction(sessionId, sectionKey, cat, i, newFlagged).catch(() => null)
-    }}
-    onPlace={() => {
-      const content = item.title ? `${item.title} — ${item.content}` : item.content
-      onItemPlaced({
-        id: `${sectionKey}-${cat}-${i}`,
-        content,
-        type: cat === 'application' ? 'application' : cat === 'practical' ? 'illustration' : 'sub_point',
-        source: 'research',
-      })
-    }}
-  />
-))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div className="md:hidden p-4 flex-1 min-h-0 overflow-y-auto">
+                {mobileTab === 'scripture' && renderScripturePane(block)}
+                {mobileTab === 'notes' && renderNotesPane(block)}
+                {mobileTab === 'research' && renderResearchPane(block)}
+              </div>
             </div>
           )
         })}
@@ -892,11 +1001,13 @@ function AutoResizeTextarea({
   onChange,
   placeholder,
   className,
+  onKeyDown,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
   className?: string
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -921,6 +1032,7 @@ function AutoResizeTextarea({
       }}
       placeholder={placeholder}
       className={className}
+      onKeyDown={onKeyDown}
     />
   )
 }

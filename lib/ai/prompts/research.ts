@@ -39,11 +39,7 @@ function buildWordStudyPrompt(input: ResearchInput): PromptPayload {
 Return ONLY a JSON array. No markdown, no explanation.
 Each item: { title, content, subcategory, confidence, metadata }
 - title: the English word as it appears in the passage (e.g. "grace", "justified", "abide")
-<<<<<<< HEAD
 - content: 3-5 sentences. Lead with what this word actually meant in its original context,
-=======
-- content: 3–5 sentences. Lead with what this word actually meant in its original context,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   then explain what it means in THIS passage specifically, then why it matters for preaching.
   Be a scholar helping a practitioner, not writing a lexicon entry.
 - subcategory: "word"
@@ -52,17 +48,10 @@ Each item: { title, content, subcategory, confidence, metadata }
   - word: the original language spelling (Greek or Hebrew characters if possible, else transliteration)
   - original_language: "hebrew" | "greek" | "aramaic"
   - strongs_ref: Strong's number if confidently known (e.g. "G5485"), else null
-<<<<<<< HEAD
   - semantic_range: array of 2-4 short meaning facets (e.g. ["unmerited favor", "gift", "beauty"])
     Keep each facet to 1-3 words. These appear as chips in the UI.
 
 Generate 4-6 words. Avoid the obvious (e.g. "God", "Lord" unless they are the theological point).
-=======
-  - semantic_range: array of 2–4 short meaning facets (e.g. ["unmerited favor", "gift", "beauty"])
-    Keep each facet to 1–3 words. These appear as chips in the UI.
-
-Generate 4–6 words. Avoid the obvious (e.g. "God", "Lord" unless they are the theological point).
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 Favor words where the original language meaningfully deepens the English.`
 
   const user = `Passage: ${input.scriptureRef}
@@ -81,13 +70,8 @@ function buildRelatedTextPrompt(input: ResearchInput): PromptPayload {
 Each item: { title, content, subcategory, confidence, metadata }
 - title: the scripture reference ONLY (e.g. "Romans 5:8", "Isaiah 53:5")
   Do not include any other text in the title — just the reference.
-<<<<<<< HEAD
 - content: 2-3 sentences. Start with ONE sentence explaining the direct connection to the primary passage.
   Then 1-2 sentences on how a preacher could use this connection in the message.
-=======
-- content: 2–3 sentences. Start with ONE sentence explaining the direct connection to the primary passage.
-  Then 1–2 sentences on how a preacher could use this connection in the message.
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 - subcategory: "cross_ref_common" for widely used connections, "cross_ref_less_common" for less obvious but genuinely fitting
 - confidence: "high" | "medium" | "low"
 - metadata:
@@ -96,11 +80,7 @@ Each item: { title, content, subcategory, confidence, metadata }
   - relation_type: "common" | "less_common"
   - connection_type: "fulfillment" | "parallel" | "contrast" | "theme" | "quotation" | "allusion"
 
-<<<<<<< HEAD
 Return 4-5 common references and 2-3 less-common ones (6-8 total).
-=======
-Return 4–5 common references and 2–3 less-common ones (6–8 total).
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 For less-common refs: only include if the connection is genuinely illuminating, not merely topical.`
 
   const user = `Primary passage: ${input.scriptureRef}
@@ -122,11 +102,7 @@ Each item: { title, content, subcategory, confidence, metadata }
 - title: short, specific label (e.g. "Reformed: unconditional election", "Arminian: prevenient grace")
   For the primary tradition, start with the tradition name. For contrasting views, label clearly.
 - content: Start with ONE plain-language sentence summarizing the interpretive position.
-<<<<<<< HEAD
   Then 2-4 sentences of substantive explanation — what does this tradition emphasize,
-=======
-  Then 2–4 sentences of substantive explanation — what does this tradition emphasize,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   what textual evidence do they point to, and what are the pastoral implications?
   Do not be generic. Be specific to THIS passage.
 - subcategory: "primary_tradition" | "cross_tradition"
@@ -136,11 +112,7 @@ Each item: { title, content, subcategory, confidence, metadata }
   - is_cross_tradition: boolean
   - key_emphasis: one sentence capturing the core interpretive distinctive
 
-<<<<<<< HEAD
 Return 2-3 items from the primary tradition (${tradName}), then 2-3 contrasting perspectives.
-=======
-Return 2–3 items from the primary tradition (${tradName}), then 2–3 contrasting perspectives.
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 Only include contrasting views where THIS passage is genuinely interpreted differently across traditions.
 Avoid padding with views that are essentially the same.`
 
@@ -161,11 +133,7 @@ function buildPracticalPrompt(input: ResearchInput): PromptPayload {
 Each item: { title, content, subcategory, confidence, metadata }
 - subcategory: "application" | "analogy" | "insight"
 - title: evocative short label that a pastor could use as a sermon point label
-<<<<<<< HEAD
 - content: 2-4 vivid, specific sentences.
-=======
-- content: 2–4 vivid, specific sentences.
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   - application: direct and concrete. Name a specific type of person or life situation.
     Avoid vague "apply this to your life" language.
   - analogy: a clear, contemporary comparison that makes the text click.
@@ -178,11 +146,7 @@ Each item: { title, content, subcategory, confidence, metadata }
   - suggested_block_type: "application" | "illustration" | "point"
   - audience_context: brief note on who this is most relevant to (optional)
 
-<<<<<<< HEAD
 Return 3-4 applications, 2-3 analogies, 2-3 insights (8-10 total).
-=======
-Return 3–4 applications, 2–3 analogies, 2–3 insights (8–10 total).
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 Be specific. Generic suggestions are useless to a pastor preparing a real sermon.`
 
   const user = `Passage: ${input.scriptureRef}
@@ -201,11 +165,7 @@ function buildHistoricalPrompt(input: ResearchInput): PromptPayload {
 Each item: { title, content, subcategory, confidence, metadata }
 - subcategory: "cultural_context" | "interpretive_history" | "early_church"
 - title: short, specific label
-<<<<<<< HEAD
 - content: 3-4 sentences. Lead with the most directly useful fact for sermon prep,
-=======
-- content: 3–4 sentences. Lead with the most directly useful fact for sermon prep,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   then explain why it matters for understanding the passage today.
   Avoid academic hedging. Be concise and direct.
 - confidence: "high" | "medium" | "low"

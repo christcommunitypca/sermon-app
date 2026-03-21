@@ -7,6 +7,10 @@ import { getSessionWithOutline, getThoughtsForSession, ensureOutline } from '@/l
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { saveResearchItems } from '@/lib/research'
 import type { ResearchCategory } from '@/types/database'
+import {
+  buildOutlinePromptParts,
+  renderOutlinePromptForLLM,
+} from '@/lib/outlinePrompt'
 
 // ── Generate series plan ────────────────────────────────────────────────────
 export async function generateSeriesAction(input: {
@@ -46,7 +50,12 @@ export async function generateOutlineAction(input: {
 
   const outline = data.outline ?? await ensureOutline(input.sessionId, input.churchId)
   const thoughts = await getThoughtsForSession(input.sessionId)
-
+  const parts = buildOutlinePromptParts({
+    flowStructure: input.flowStructure,
+    selectedInsights: input.selectedInsights,
+    verseNotesForAI: input.verseNotes,
+  })
+  
   try {
     const result = await generateOutline(user.id, {
       session: {
@@ -62,6 +71,7 @@ export async function generateOutlineAction(input: {
       verseNotes: input.verseNotes,
       selectedInsights: input.selectedInsights,
     })
+  
     return { blocks: result.blocks, model: result.model, error: null }
   } catch (err) {
     if (err instanceof AIError) return { blocks: null, model: null, error: err.message }

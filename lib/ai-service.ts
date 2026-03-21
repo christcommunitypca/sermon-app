@@ -44,7 +44,7 @@ import * as TagsPrompt     from '@/lib/ai/prompts/tags'
 import * as VerseInsightsPrompt from '@/lib/ai/prompts/verse-insights'
 import type { InsightCategory } from '@/lib/ai/prompts/verse-insights'
 import * as LessonSummaryPrompt from '@/lib/ai/prompts/lesson-summary'
-
+import { buildOutlinePromptParts, renderOutlinePromptForLLM } from '@/lib/outlinePrompt'
 import type { OutlineBlock, ResearchCategory, ProposedWeek } from '@/types/database'
 import type { VerseInsightInput, VerseInsightResult, RawVerseInsight, LessonSummaryInput, LessonSummaryResult, ProviderName } from '@/lib/ai/types'
 

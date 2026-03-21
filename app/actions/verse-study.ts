@@ -5,20 +5,17 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { fetchPassage, type VerseData } from '@/lib/esv'
 import {
   generateVerseInsights,
-<<<<<<< HEAD
   generatePericopeInsights,
   type PericopeSection,
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   generateLessonSummary,
   buildCopyablePrompt,
+  splitStudyNotes,
   AIError,
 } from '@/lib/ai/service'
 import { getUserTradition } from '@/lib/research'
 import { getFlatRenderOrder } from '@/lib/outline'
 import type { OutlineBlock, VerseNote } from '@/types/database'
 
-<<<<<<< HEAD
 type InsightItem = {
   title: string
   content: string
@@ -27,8 +24,6 @@ type InsightItem = {
   is_flagged?: boolean
   used_count?: number
 }
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 // ── fetchVerseDataAction ───────────────────────────────────────────────────────
 // Returns cached ESV text + saved insights + all verse notes.
 // Called on page load and after AI generation.
@@ -38,16 +33,12 @@ export async function fetchVerseDataAction(
   scriptureRef: string
 ): Promise<{
   verses: VerseData[] | null
-<<<<<<< HEAD
   insights: Record<string, Record<string, {
     title: string
     content: string
     source_label?: string
     source_url?: string
   }[]>>
-=======
-  insights: Record<string, Record<string, { title: string; content: string }[]>>
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   verseNotes: Record<string, VerseNote[]>
   error: string | null
 }> {
@@ -72,7 +63,6 @@ export async function fetchVerseDataAction(
         .order('position'),
     ])
 
-<<<<<<< HEAD
     const insights: Record<string, Record<string, {
       title: string
       content: string
@@ -83,12 +73,6 @@ export async function fetchVerseDataAction(
     for (const row of insightRows ?? []) {
       if (!insights[row.verse_ref]) insights[row.verse_ref] = {}
       insights[row.verse_ref][row.category] = row.items as InsightItem[]
-=======
-    const insights: Record<string, Record<string, { title: string; content: string }[]>> = {}
-    for (const row of insightRows ?? []) {
-      if (!insights[row.verse_ref]) insights[row.verse_ref] = {}
-      insights[row.verse_ref][row.category] = row.items as { title: string; content: string }[]
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     }
 
     const verseNotes: Record<string, VerseNote[]> = {}
@@ -321,7 +305,6 @@ export async function generateVerseInsightsAction(
       teacher_id: user.id,
       verse_ref: insight.verse_ref,
       category: insight.category,
-<<<<<<< HEAD
       items:
       insight.category === 'word_study'
         ? filterWordStudyItems(
@@ -329,9 +312,6 @@ export async function generateVerseInsightsAction(
         selectedWords?.[insight.verse_ref] ?? []
         )
         : dedupeInsightItems(insight.items ?? []),
-=======
-      items: insight.items,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       model: result.model,
       prompt_version: result.prompt_version,
       generated_at: new Date().toISOString(),
@@ -429,22 +409,6 @@ export async function getLessonSummaryPromptAction(
   return { prompt, error: null }
 }
 
-// ── updateTeachingModeAction ───────────────────────────────────────────────────
-
-export async function updateTeachingModeAction(
-  sessionId: string,
-  mode: 'study' | 'outline'
-
-): Promise<void> {
-  const user = await getActionUser()
-  if (!user) return
-
-  await supabaseAdmin
-    .from('teaching_sessions')
-    .update({ teaching_mode: mode })
-    .eq('id', sessionId)
-    .eq('teacher_id', user.id)
-}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -543,11 +507,7 @@ export async function incrementInsightUsedCountAction(
 
   if (error || !data) return { error: 'Insight not found' }
 
-<<<<<<< HEAD
   const items = data.items as InsightItem[]
-=======
-  const items = (data.items as { title: string; content: string; is_flagged?: boolean; used_count?: number }[])
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   if (!items[itemIndex]) return { error: 'Item index out of range' }
 
   items[itemIndex] = { ...items[itemIndex], used_count: (items[itemIndex].used_count ?? 0) + 1 }
@@ -562,7 +522,6 @@ export async function incrementInsightUsedCountAction(
 
   return { error: updateError?.message ?? null }
 }
-<<<<<<< HEAD
 
 // ── generatePericopeInsightsAction ───────────────────────────────────────────
 // Generates insights for a single pericope section.
@@ -791,5 +750,94 @@ export async function updateStudyModeAction(
     .eq('id', sessionId)
     .eq('teacher_id', user.id)
 }
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
+
+export async function splitVerseNotesAction(
+  sessionId: string,
+  churchId: string,
+  noteIds: string[]
+): Promise<{ verseNotes: Record<string, VerseNote[]>; error: string | null }> {
+  const user = await getActionUser()
+  if (!user) return { verseNotes: {}, error: 'Session expired.' }
+
+  const ids = Array.from(new Set(noteIds)).filter(Boolean)
+  if (!ids.length) return { verseNotes: {}, error: 'Select at least one note.' }
+
+  const { data: notes, error: loadError } = await supabaseAdmin
+    .from('verse_notes')
+    .select('*')
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .in('id', ids)
+    .order('position')
+
+  if (loadError) return { verseNotes: {}, error: loadError.message }
+  if (!notes?.length) return { verseNotes: {}, error: 'Selected notes were not found.' }
+
+  const byVerse = new Set(notes.map(n => n.verse_ref))
+  if (byVerse.size !== 1) return { verseNotes: {}, error: 'Split notes one section at a time.' }
+
+  let cards: { sourceId: string; content: string; category: string }[] = []
+
+  try {
+    const result = await splitStudyNotes(user.id, {
+      notes: notes.map(n => ({ id: n.id, content: n.content }))
+    })
+    cards = result.cards
+  } catch {
+    const fallback: { sourceId: string; content: string; category: string }[] = []
+    for (const note of notes) {
+      const parts = note.content
+        .split(/\n+|(?<=[.!?;])\s+(?=[A-Z0-9])/g)
+        .map((part: string) => part.trim())
+        .filter(Boolean)
+      const usable = parts.length > 1 ? parts : [note.content.trim()]
+      for (const part of usable) fallback.push({ sourceId: note.id, content: part, category: 'observation' })
+    }
+    cards = fallback
+  }
+
+  const grouped = new Map<string, string[]>()
+  for (const note of notes) grouped.set(note.id, [])
+  for (const card of cards) {
+    const current = grouped.get(card.sourceId) ?? []
+    if (!current.includes(card.content)) current.push(card.content)
+    grouped.set(card.sourceId, current)
+  }
+
+  for (const note of notes) {
+    const parts = grouped.get(note.id) ?? []
+    if (!parts.length) parts.push(note.content.trim())
+
+    const [first, ...rest] = parts
+    await supabaseAdmin
+      .from('verse_notes')
+      .update({ content: first, updated_at: new Date().toISOString() })
+      .eq('id', note.id)
+      .eq('teacher_id', user.id)
+
+    if (rest.length) {
+      const { data: existing } = await supabaseAdmin
+        .from('verse_notes')
+        .select('position')
+        .eq('session_id', sessionId)
+        .eq('teacher_id', user.id)
+        .eq('verse_ref', note.verse_ref)
+        .order('position', { ascending: false })
+        .limit(1)
+
+      let nextPos = existing && existing.length > 0 ? existing[0].position + 1 : note.position + 1
+      const inserts = rest.map(content => ({
+        session_id: sessionId,
+        church_id: churchId,
+        teacher_id: user.id,
+        verse_ref: note.verse_ref,
+        content,
+        position: nextPos++,
+      }))
+      const { error } = await supabaseAdmin.from('verse_notes').insert(inserts)
+      if (error) return { verseNotes: {}, error: error.message }
+    }
+  }
+
+  return loadVerseNotesAction(sessionId)
+}

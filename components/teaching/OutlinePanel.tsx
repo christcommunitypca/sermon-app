@@ -8,7 +8,6 @@ import {
 } from 'lucide-react'
 import { OutlineBlock, VerseNote } from '@/types/database'
 import type { PendingItem, StepState } from './TeachingWorkspace'
-import { StepIndicator } from './StepIndicator'
 import { incrementNoteUsedCountAction, incrementInsightUsedCountAction } from '@/app/actions/verse-study'
 import { AISourceBadge } from './AISourceBadge'
 import { OutlineReference } from './OutlineReference'
@@ -21,6 +20,12 @@ import {
 } from '@/lib/outline'
 import { saveBlocksAction, createManualSnapshotAction } from '@/app/(app)/[churchSlug]/teaching/[sessionId]/outline-actions'
 import { generateOutlineAction } from '@/app/actions/ai'
+
+import {
+  buildOutlinePromptParts,
+  renderOutlinePromptForHuman,
+  type OutlineSelectedInsight,
+} from '@/lib/outlinePrompt'
 
 const BLOCK_TYPE_LABELS: Record<OutlineBlock['type'], string> = {
   point: 'Point',
@@ -46,6 +51,8 @@ const BLOCK_BORDER_COLORS: Record<OutlineBlock['type'], string> = {
 
 const MAX_DEPTH = 4
 
+
+
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 
@@ -59,7 +66,6 @@ interface Props {
   flowStructure?: { type: string; label: string }[]
   hasValidAIKey: boolean
   estimatedDuration: number | null
-<<<<<<< HEAD
   initialVerses: Array<{ verse_ref: string; text: string }>
   initialInsights: Insights
   initialVerseNotes: Record<string, VerseNote[]>
@@ -67,30 +73,26 @@ interface Props {
   onSaveTrigger?:        (fn: () => void) => void
   onAITrigger?:          (fn: () => void) => void
   onRegisterAIContext?:  (ctx: { hasBlocks: boolean; aiLoading: boolean; onDraft: () => void; onReview: () => void }) => void
-=======
-  initialInsights: Insights
-  initialVerseNotes: Record<string, VerseNote[]>
-  onInsightsChange: (insights: Insights) => void
-  onSaveTrigger?:   (fn: () => void) => void
-  onAITrigger?:     (fn: () => void) => void
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   pending:          PendingItem | null
   onItemPlaced:     (item: PendingItem) => void
   onPendingFromRef: (item: PendingItem) => void
   onCancelPending:  () => void
   steps:            StepState[]
+  activeReferenceTab?: 'notes' | 'ai'
+  onReferenceTabChange?: (tab: 'notes' | 'ai') => void
+  activeSectionVerseRefs?: string[]
+  sessionTitle: string
+  sessionType: string
+  sessionNotes?: string | null
+  scriptureRef?: string | null
 }
 
 export function OutlinePanel({
   outlineId, sessionId, churchId, churchSlug,
   blocks, onBlocksChange, flowStructure, hasValidAIKey,
-<<<<<<< HEAD
-  estimatedDuration, initialVerses, initialInsights, initialVerseNotes,
-  onInsightsChange, onSaveTrigger, onAITrigger, onRegisterAIContext, pending, onItemPlaced, onPendingFromRef, onCancelPending, steps,
-=======
-  estimatedDuration, initialInsights, initialVerseNotes,
-  onInsightsChange, onSaveTrigger, onAITrigger, pending, onItemPlaced, onPendingFromRef, onCancelPending, steps,
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
+  estimatedDuration, sessionTitle, sessionType, sessionNotes, scriptureRef, initialVerses, initialInsights, initialVerseNotes,
+  onInsightsChange, onSaveTrigger, onAITrigger, onRegisterAIContext, pending, onItemPlaced, 
+  onPendingFromRef, onCancelPending, steps, activeReferenceTab, onReferenceTabChange,  activeSectionVerseRefs,
 }: Props) {
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -100,30 +102,25 @@ export function OutlinePanel({
   const [showSummary,   setShowSummary]   = useState(false)
   const [showAssist,    setShowAssist]    = useState(false)
   const [showDraftModal, setShowDraftModal] = useState(false)
-<<<<<<< HEAD
-=======
-  const assistRef = useRef<HTMLDivElement>(null)
 
-  // Register external trigger callbacks so workspace toolbar can fire these
-  useEffect(() => {
-    onSaveTrigger?.(() => setShowSnapshotInput(v => !v))
-    onAITrigger?.(() => setShowAssist(v => !v))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
-
+  const [showPromptModal, setShowPromptModal] = useState(false)
+  const [promptPreview, setPromptPreview] = useState('')
+  const [llmPromptPreview, setLlmPromptPreview] = useState('')
   // AI state
   const [aiLoading, setAILoading] = useState(false)
   const [aiProposed,   setAIProposed]   = useState<OutlineBlock[] | null>(null)
   const [aiError,      setAIError]      = useState<string | null>(null)
   const [hiddenVerses, setHiddenVerses] = useState<Set<string>>(new Set())
+  
 
-<<<<<<< HEAD
   // Register external trigger callbacks so workspace toolbar can fire these
   useEffect(() => {
-    onSaveTrigger?.(() => { flushSave().catch(() => null) })
-    onAITrigger?.(() => setShowAssist(v => !v))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    onSaveTrigger?.(() => { flushSave().catch(() => null) })    
+    onAITrigger?.(() => {
+      setShowAssist(false)
+      setShowDraftModal(true)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
 
@@ -141,8 +138,6 @@ export function OutlinePanel({
     latestBlocksRef.current = blocks
   }, [blocks])
 
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   function toggleVerse(ref: string) {
     setHiddenVerses(prev => { const n = new Set(prev); n.has(ref) ? n.delete(ref) : n.add(ref); return n })
   }
@@ -152,11 +147,12 @@ export function OutlinePanel({
     ...Object.keys(initialInsights),
   ])).sort()
 
+  const scopedVerseRefs = activeSectionVerseRefs?.length
+  ? allVerseRefs.filter(ref => activeSectionVerseRefs.includes(ref))
+  : allVerseRefs
+
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-<<<<<<< HEAD
   const latestBlocksRef = useRef<OutlineBlock[]>(blocks)
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   const flatBlocks = getFlatRenderOrder(blocks)
   const totalMins = totalEstimatedMinutes(blocks)
   const targetMins = estimatedDuration ?? 0
@@ -166,7 +162,6 @@ export function OutlinePanel({
 
   // ── Auto-save ────────────────────────────────────────────────────────────────
   const scheduleSave = useCallback((newBlocks: OutlineBlock[]) => {
-<<<<<<< HEAD
     latestBlocksRef.current = newBlocks
   
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -174,18 +169,12 @@ export function OutlinePanel({
   
     saveTimerRef.current = setTimeout(async () => {
       saveTimerRef.current = null
-=======
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    setSaveState('saving')
-    saveTimerRef.current = setTimeout(async () => {
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
       const result = await saveBlocksAction(outlineId, sessionId, churchId, newBlocks)
       if (result.error) {
         setSaveState('error')
       } else {
         setSaveState('saved')
         setLastSaved(new Date())
-<<<<<<< HEAD
       }
     }, 800)
   }, [outlineId, sessionId, churchId])
@@ -208,13 +197,6 @@ export function OutlinePanel({
     }
   }
   
-=======
-        setTimeout(() => setSaveState('idle'), 2000)
-      }
-    }, 800)
-  }, [outlineId, sessionId, churchId])
-
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   function update(newBlocks: OutlineBlock[]) {
     onBlocksChange(newBlocks)
     scheduleSave(newBlocks)
@@ -242,7 +224,6 @@ export function OutlinePanel({
 
   function handleMoveUp(id: string) { update(moveUp(blocks, id)) }
   function handleMoveDown(id: string) { update(moveDown(blocks, id)) }
-<<<<<<< HEAD
   function handlePromote(id: string) {
     const promoted = promote(blocks, id)
     // If promoted to root level (no parent), convert sub_point → point
@@ -263,10 +244,6 @@ export function OutlinePanel({
       update(demoted)
     }
   }
-=======
-  function handlePromote(id: string) { update(promote(blocks, id)) }
-  function handleDemote(id: string) { update(demote(blocks, id)) }
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
   function handleAddBelow(afterId: string) {
     const anchor = blocks.find((b: OutlineBlock) => b.id === afterId)
@@ -369,19 +346,56 @@ export function OutlinePanel({
     }
   }
 
+  function handleViewPrompt(
+    selectedInsights?: OutlineSelectedInsight[],
+    verseNotesForAI?: Record<string, string>
+  ) {
+    const parts = buildOutlinePromptParts({
+      flowStructure,
+      selectedInsights,
+      verseNotesForAI,
+      thoughts: [],
+      sessionEstimatedDuration: estimatedDuration,
+    })
+  
+    const preview = renderOutlinePromptForHuman({
+      session: {
+        title: 'Preview from current teaching workspace',
+        type: 'Sermon',
+        scriptureRef: initialVerses?.[0]?.verse_ref ?? null,
+        notes: null,
+        estimatedDuration,
+      },
+      parts,
+    })
+  
+    setPromptPreview(preview)
+    setLlmPromptPreview('The exact LLM prompt is now generated in the prompt builder. This preview shows the same content in readable form.')
+    setShowPromptModal(true)
+  }
+  
   // ── AI generation ────────────────────────────────────────────────────────────
   async function handleGenerateAI(
-    selectedInsights?: { verseRef: string; category: string; title: string; content: string }[],
+    selectedInsights?: OutlineSelectedInsight[],
     verseNotesForAI?: Record<string, string>
   ) {
     setAILoading(true)
     setAIError(null)
     try {
-      const data = await generateOutlineAction({
-        sessionId, churchId, flowStructure,
+      const parts = buildOutlinePromptParts({
+        flowStructure,
         selectedInsights,
-        verseNotes: verseNotesForAI,
+        verseNotesForAI,
       })
+  
+      const data = await generateOutlineAction({
+        sessionId,
+        churchId,
+        flowStructure: parts.flowStructure,
+        selectedInsights: parts.selectedInsights,
+        verseNotes: parts.verseNotes,
+      })
+  
       if (data.error || !data.blocks) {
         setAIError(data.error ?? 'Generation failed')
       } else {
@@ -400,17 +414,116 @@ export function OutlinePanel({
     setAIProposed(null)
   }
 
+  
+  // function buildOutlinePromptParts(
+  //   selectedInsights?: { verseRef: string; category: string; title: string; content: string }[],
+  //   verseNotesForAI?: Record<string, string>
+  // ) {
+  //   return {
+  //     request: [
+  //       'Build a clear, faithful, sermon-ready outline based on the material below.',
+  //       'Produce an outline, not a manuscript.',
+  //       'Use concise, pulpit-friendly wording.',
+  //       'Organize the material according to the requested sermon flow if one is provided.',
+  //       'Use the notes and insights as source material, but rewrite them into natural sermon-outline language.',
+  //       'Prefer clarity, theological faithfulness, and strong movement between points.',
+  //       'Include major points and sub-points where appropriate.',
+  //       'Do not include filler commentary about the process.',
+  //     ],
+  //     flowStructure: flowStructure?.length
+  //       ? flowStructure.map(s => ({ label: s.label, type: s.type }))
+  //       : [],
+  //     verseNotes: verseNotesForAI ?? {},
+  //     selectedInsights: selectedInsights ?? [],
+  //   }
+  // }
+  
+  // function renderOutlinePromptForLLM(parts: ReturnType<typeof buildOutlinePromptParts>) {
+  //   const flowText = parts.flowStructure.length
+  //     ? parts.flowStructure.map(s => `- ${s.label} (${s.type})`).join('\n')
+  //     : 'No specific flow structure provided.'
+  
+  //   const notesText = Object.keys(parts.verseNotes).length
+  //     ? Object.entries(parts.verseNotes)
+  //         .map(([verseRef, noteText]) => `## ${verseRef}\n${noteText}`)
+  //         .join('\n\n')
+  //     : 'No verse notes provided.'
+  
+  //   const insightsText = parts.selectedInsights.length
+  //     ? parts.selectedInsights
+  //         .map(item => {
+  //           const titleLine = item.title ? `Title: ${item.title}\n` : ''
+  //           return `## ${item.verseRef} | ${item.category}\n${titleLine}${item.content}`
+  //         })
+  //         .join('\n\n')
+  //     : 'No selected insights provided.'
+  
+  //   return `You are helping generate a sermon outline.
+  
+  // ${parts.request.join('\n')}
+  
+  // FLOW STRUCTURE
+  // ${flowText}
+  
+  // VERSE NOTES
+  // ${notesText}
+  
+  // SELECTED INSIGHTS
+  // ${insightsText}`
+  // }
+  
+  // function renderOutlinePromptForHuman(parts: ReturnType<typeof buildOutlinePromptParts>) {
+  //   const lines: string[] = []
+  
+  //   lines.push('OUTLINE PROMPT PREVIEW')
+  //   lines.push('')
+  //   lines.push('REQUEST')
+  //   parts.request.forEach(line => lines.push(`- ${line}`))
+  //   lines.push('')
+  
+  //   lines.push('FLOW STRUCTURE')
+  //   if (parts.flowStructure.length) {
+  //     parts.flowStructure.forEach(item => {
+  //       lines.push(`- ${item.label} (${item.type})`)
+  //     })
+  //   } else {
+  //     lines.push('No specific flow structure provided.')
+  //   }
+  //   lines.push('')
+  
+  //   lines.push('VERSE NOTES')
+  //   if (Object.keys(parts.verseNotes).length) {
+  //     Object.entries(parts.verseNotes).forEach(([verseRef, noteText]) => {
+  //       lines.push(verseRef)
+  //       lines.push(noteText)
+  //       lines.push('')
+  //     })
+  //   } else {
+  //     lines.push('No verse notes provided.')
+  //     lines.push('')
+  //   }
+  
+  //   lines.push('SELECTED INSIGHTS')
+  //   if (parts.selectedInsights.length) {
+  //     parts.selectedInsights.forEach(item => {
+  //       lines.push(`${item.verseRef} | ${item.category}`)
+  //       if (item.title) lines.push(`Title: ${item.title}`)
+  //       lines.push(item.content)
+  //       lines.push('')
+  //     })
+  //   } else {
+  //     lines.push('No selected insights provided.')
+  //     lines.push('')
+  //   }
+  
+  //   return lines.join('\n')
+  // }
+
   return (
     <>
-<<<<<<< HEAD
     <div className="flex gap-3 min-h-[600px] overflow-x-hidden">
       {/* ── Left: Outline editor ─────────────────────────────────────────── */}
       <div className="w-[48%] min-w-0 flex-shrink-0 flex flex-col gap-3 relative">
-=======
-    <div className="flex gap-5 min-h-[600px]">
-      {/* ── Left: Outline editor ─────────────────────────────────────────── */}
-      <div className="w-[50%] flex flex-col gap-3">
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
         {/* Snapshot input — shown inline when triggered from workspace toolbar */}
         {showSnapshotInput && (
           <div className="flex items-center gap-1">
@@ -433,30 +546,10 @@ export function OutlinePanel({
           </div>
         )}
 
-<<<<<<< HEAD
         {/* AssistDropdown now rendered in TeachingWorkspace toolbar, anchored to AI button */}
 
         {/* Save state indicator */}
         <SaveIndicator state={saveState} lastSaved={lastSaved} />
-=======
-        {/* AI assist dropdown — triggered from workspace toolbar button */}
-        <div className="relative" ref={assistRef} style={{ height: 0 }}>
-          {showAssist && (
-            <AssistDropdown
-              hasBlocks={blocks.length > 0}
-              aiLoading={aiLoading}
-              onDraftOutline={() => { setShowAssist(false); setShowDraftModal(true) }}
-              onOutlineReview={() => { setShowAssist(false); setShowSummary(true) }}
-              onClose={() => setShowAssist(false)}
-            />
-          )}
-        </div>
-
-        {/* Save state indicator */}
-        {(saveState === 'saved' || saveState === 'saving' || saveState === 'error') && (
-          <SaveIndicator state={saveState} lastSaved={lastSaved} />
-        )}
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
         {/* Time bar — shown below toolbar when target is set */}
         {targetMins > 0 && (
@@ -559,23 +652,23 @@ export function OutlinePanel({
       </div>
 
       {/* ── Right: Reference panel ───────────────────────────────────────── */}
-<<<<<<< HEAD
       <div className="flex-1 min-w-0 overflow-y-auto flex flex-col gap-2 min-h-0">
         <OutlineReference
           verses={initialVerses}
-=======
-      <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0">
-        <OutlineReference
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
           insights={initialInsights}
           verseNotes={initialVerseNotes}
           hiddenVerses={hiddenVerses}
-          allVerseRefs={allVerseRefs}
+          allVerseRefs={scopedVerseRefs}
           onToggleVerse={toggleVerse}
           sessionId={sessionId}
           pendingItemId={pending?.sourceId ?? null}
           onPendingItem={onPendingFromRef}
           onInsightsChange={onInsightsChange}
+          activeTab={activeReferenceTab}
+          onActiveTabChange={(tab) => {
+            if (tab === 'notes' || tab === 'ai') onReferenceTabChange?.(tab)
+          }}
+          hideTopTabs
         />
       </div>
 
@@ -604,7 +697,30 @@ export function OutlinePanel({
             }
             handleGenerateAI(selectedInsights, notesForAI)
           }}
+          onViewPrompt={(selectedInsights) => {
+            const notesForAI: Record<string, string> = {}
+            for (const [vRef, notes] of Object.entries(initialVerseNotes)) {
+              const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+              if (text) notesForAI[vRef] = text
+            }
+            handleViewPrompt(selectedInsights, notesForAI)
+          }}
           onClose={() => setShowDraftModal(false)}
+        />
+      )}
+      {/* {showDraftModal && (
+  <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
+    <div className="bg-white rounded-2xl shadow-2xl p-8 text-black text-lg font-semibold">
+      DRAFT MODAL TEST
+    </div>
+  </div>
+)} */}
+
+      {showPromptModal && (
+        <PromptPreviewModal
+          humanPrompt={promptPreview}
+          llmPrompt={llmPromptPreview}
+          onClose={() => setShowPromptModal(false)}
         />
       )}
     </div>
@@ -612,6 +728,198 @@ export function OutlinePanel({
   )
 }
 
+export function PromptPreviewModal({
+  humanPrompt,
+  llmPrompt,
+  onClose,
+}: {
+  humanPrompt: string
+  llmPrompt: string
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const [activeView, setActiveView] = useState<'human' | 'llm'>('human')
+  const displayedPrompt = activeView === 'human' ? humanPrompt : llmPrompt
+ 
+
+ 
+  async function handleCopy() {
+    await navigator.clipboard.writeText(displayedPrompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Outline Prompt Preview</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Review or copy the prompt payload before sending to AI.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-4">
+
+        <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => setActiveView('human')}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                activeView === 'human'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              Human Readable
+            </button>
+
+            <button
+              onClick={() => setActiveView('llm')}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                activeView === 'llm'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              LLM Prompt
+            </button>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto">
+  {activeView === 'human' ? (
+    <ReadablePromptView content={displayedPrompt} />
+  ) : (
+    <pre className="text-xs leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
+      {displayedPrompt}
+    </pre>
+  )}
+</div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Close
+          </button>
+
+          <button
+            onClick={handleCopy}
+            className="px-4 py-2 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            {copied ? 'Copied' : 'Copy to Clipboard'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReadablePromptView({ content }: { content: string }) {
+  const lines = content.split('\n')
+
+  function isLabelValueLine(line: string) {
+    return /^(Title|Type|Scripture|Notes|Version|Temperature|Target delivery time):\s/.test(line)
+  }
+
+  function splitLabelValue(line: string) {
+    const idx = line.indexOf(':')
+    if (idx === -1) return { label: line, value: '' }
+    return {
+      label: line.slice(0, idx),
+      value: line.slice(idx + 1).trim(),
+    }
+  }
+
+  return (
+    <div className="space-y-1 text-sm text-slate-700">
+      {lines.map((rawLine, idx) => {
+        const line = rawLine.trim()
+
+        if (!line) {
+          return <div key={idx} className="h-2" />
+        }
+
+        if (line.startsWith('# ')) {
+          return (
+            <h1 key={idx} className="text-lg font-bold text-slate-900">
+              {line.slice(2)}
+            </h1>
+          )
+        }
+
+        if (line.startsWith('## ')) {
+          return (
+            <h2 key={idx} className="pt-3 text-sm font-bold uppercase tracking-wide text-slate-900 border-t border-slate-200 first:border-t-0 first:pt-0">
+              {line.slice(3)}
+            </h2>
+          )
+        }
+
+        if (line.startsWith('### ')) {
+          return (
+            <h3 key={idx} className="pt-1 text-sm font-semibold text-slate-800">
+              {line.slice(4)}
+            </h3>
+          )
+        }
+
+        if (isLabelValueLine(line)) {
+          const { label, value } = splitLabelValue(line)
+          return (
+            <div key={idx} className="grid grid-cols-[170px_1fr] gap-3 leading-relaxed">
+              <div className="font-semibold text-slate-900">{label}</div>
+              <div className="text-slate-700 break-words">{value || '—'}</div>
+            </div>
+          )
+        }
+
+        if (/^\d+\.\s/.test(line)) {
+          const number = line.match(/^\d+\./)?.[0] ?? ''
+          const text = line.replace(/^\d+\.\s/, '')
+          return (
+            <div key={idx} className="grid grid-cols-[24px_1fr] gap-2 leading-relaxed">
+              <div className="font-semibold text-slate-900">{number}</div>
+              <div>{text}</div>
+            </div>
+          )
+        }
+
+        if (line.startsWith('- ')) {
+          return (
+            <div key={idx} className="grid grid-cols-[16px_1fr] gap-2 leading-relaxed">
+              <div className="font-semibold text-slate-900">•</div>
+              <div>{line.slice(2)}</div>
+            </div>
+          )
+        }
+
+        if (line.startsWith('[') && line.includes(']')) {
+          const closing = line.indexOf(']')
+          const tag = line.slice(0, closing + 1)
+          const rest = line.slice(closing + 1).trim()
+          return (
+            <div key={idx} className="grid grid-cols-[180px_1fr] gap-3 leading-relaxed">
+              <div className="font-mono text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded px-2 py-1 w-fit">
+                {tag}
+              </div>
+              <div>{rest}</div>
+            </div>
+          )
+        }
+
+        return (
+          <p key={idx} className="leading-relaxed">
+            {line}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
 // ── BlockRow ───────────────────────────────────────────────────────────────────
 
 
@@ -702,7 +1010,6 @@ function BlockRow({
         }
         ${dimmed ? 'opacity-40 pointer-events-none select-none' : ''}
       `}
-<<<<<<< HEAD
       style={{ marginLeft: `${depth * 24}px` }}
 
     >
@@ -721,24 +1028,6 @@ function BlockRow({
           {BLOCK_TYPE_LABELS[block.type]}
         </span>
       </div>
-=======
-      style={{ marginLeft: `${depth * 20}px` }}
-
-    >
-      {/* Type selector — shows Sub-N label for sub_points based on depth */}
-      <select
-        value={block.type}
-        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onTypeChange(block.id, e.target.value as OutlineBlock['type'])}
-        className="shrink-0 text-xs text-slate-400 bg-transparent border-none focus:outline-none cursor-pointer py-1 -ml-1 max-w-[90px]"
-      >
-        {Object.entries(BLOCK_TYPE_LABELS).map(([val, label]) => (
-          <option key={val} value={val}>{label}</option>
-        ))}
-      </select>
-      {block.type === 'sub_point' && depth > 0 && (
-        <span className="text-[10px] text-slate-300 -ml-1 mr-1 shrink-0">Sub-{depth}</span>
-      )}
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
       {/* Content */}
       <div className="flex-1 min-w-0">
@@ -823,13 +1112,8 @@ function BlockRow({
         <div className="flex gap-0.5">
           <IconBtn onClick={onMoveUp} disabled={!canMoveUp} title="Move up"><ChevronUp className="w-3.5 h-3.5" /></IconBtn>
           <IconBtn onClick={onMoveDown} disabled={!canMoveDown} title="Move down"><ChevronDown className="w-3.5 h-3.5" /></IconBtn>
-<<<<<<< HEAD
           <IconBtn onClick={onPromote} disabled={!canPromote} title="Outdent ←"><ChevronLeft className="w-3.5 h-3.5" /></IconBtn>
           <IconBtn onClick={onDemote} disabled={!canDemote} title="Indent →"><ChevronRight className="w-3.5 h-3.5" /></IconBtn>
-=======
-          <IconBtn onClick={onPromote} disabled={!canPromote} title="Promote"><ChevronLeft className="w-3.5 h-3.5" /></IconBtn>
-          <IconBtn onClick={onDemote} disabled={!canDemote} title="Demote"><ChevronRight className="w-3.5 h-3.5" /></IconBtn>
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
         </div>
         <div className="flex gap-0.5 mt-0.5">
           <IconBtn onClick={onAddBelow} title="Add block below"><Plus className="w-3.5 h-3.5" /></IconBtn>
@@ -875,7 +1159,6 @@ function EmptyOutline({ outlineId, onAdd }: { outlineId: string; onAdd: (b: Outl
 }
 
 function SaveIndicator({ state, lastSaved }: { state: SaveState; lastSaved: Date | null }) {
-<<<<<<< HEAD
   let text = 'Last saved —'
   let className = 'text-xs text-slate-400'
 
@@ -893,13 +1176,6 @@ function SaveIndicator({ state, lastSaved }: { state: SaveState; lastSaved: Date
   }
 
   return <span className={className}>{text}</span>
-=======
-  if (state === 'saving') return <span className="text-xs text-slate-400 animate-pulse">Saving…</span>
-  if (state === 'saved') return <span className="text-xs text-emerald-600">Saved</span>
-  if (state === 'error') return <span className="text-xs text-red-500">Save failed</span>
-  if (lastSaved) return <span className="text-xs text-slate-300">Saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-  return null
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }
 
 function AIProposalBanner({ blocks, onAccept, onDiscard }: {
@@ -954,11 +1230,7 @@ function AssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview,
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
-<<<<<<< HEAD
   
-=======
-
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
   return (
     <div id="assist-menu" className="absolute right-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-30 overflow-hidden">
       <div className="p-1.5 space-y-0.5">
@@ -1005,12 +1277,13 @@ function DropdownItem({ icon, label, sublabel, onClick, disabled }: {
 }
 
 // ── Draft Outline Modal — pick which research items to include ─────────────────
-function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGenerate, onClose }: {
+export function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGenerate, onViewPrompt, onClose }: {
   insights:    Insights
   verseNotes:  Record<string, import('@/types/database').VerseNote[]>
   aiLoading:   boolean
   hasBlocks:   boolean
   onGenerate:  (selected: { verseRef: string; category: string; title: string; content: string }[]) => void
+  onViewPrompt: (selected: { verseRef: string; category: string; title: string; content: string }[]) => void
   onClose:     () => void
 }) {
   // Build flat list of all research items
@@ -1020,6 +1293,21 @@ function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGener
     )
   )
   const [selected, setSelected] = useState<Set<string>>(new Set(allItems.map(a => a.key)))
+
+  const [showGenerateMenu, setShowGenerateMenu] = useState(false)
+const generateMenuRef = useRef<HTMLDivElement>(null)
+
+useEffect(() => {
+  if (!showGenerateMenu) return
+  function handleClick(e: MouseEvent) {
+    if (generateMenuRef.current && !generateMenuRef.current.contains(e.target as Node)) {
+      setShowGenerateMenu(false)
+    }
+  }
+  document.addEventListener('mousedown', handleClick)
+  return () => document.removeEventListener('mousedown', handleClick)
+}, [showGenerateMenu])
+
 
   function toggle(key: string) {
     setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -1033,7 +1321,7 @@ function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGener
       .map(a => ({ verseRef: a.vRef, category: a.cat, ...a.item }))
     onGenerate(selectedItems)
   }
-
+  
   const CAT_LABEL: Record<string, string> = {
     word_study: 'Word Study', cross_refs: 'Cross-refs', context: 'Context',
     practical: 'Practical', theology_by_tradition: 'Tradition', application: 'Application', quotes: 'Quotes',
@@ -1109,18 +1397,55 @@ function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGener
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
-            Cancel
-          </button>
-          <button
-            onClick={handleGenerate}
-            disabled={aiLoading}
-            className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
-          >
-            {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {aiLoading ? 'Drafting…' : 'Draft Outline'}
-          </button>
-        </div>
+  <button
+    onClick={onClose}
+    className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+  >
+    Cancel
+  </button>
+
+  <div className="relative" ref={generateMenuRef}>
+    <button
+      type="button"
+      onClick={() => setShowGenerateMenu(v => !v)}
+      className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+    >
+      <Sparkles className="w-3.5 h-3.5" />
+      Generate Outline
+      <ChevronDown className="w-3.5 h-3.5" />
+    </button>
+
+    {showGenerateMenu && (
+      <div className="absolute right-0 bottom-full mb-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-[100] overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            setShowGenerateMenu(false)
+            const selectedItems = allItems
+              .filter(a => selected.has(a.key))
+              .map(a => ({ verseRef: a.vRef, category: a.cat, ...a.item }))
+            onViewPrompt(selectedItems)
+          }}
+          className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors"
+        >
+          View Prompt
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowGenerateMenu(false)
+            handleGenerate()
+          }}
+          disabled={aiLoading}
+          className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
+        >
+          {aiLoading ? 'Drafting…' : 'Send to AI'}
+        </button>
+      </div>
+    )}
+  </div>
+</div>
       </div>
     </div>
   )

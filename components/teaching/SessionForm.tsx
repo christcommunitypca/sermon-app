@@ -83,7 +83,6 @@ export function SessionForm({ churchId, churchSlug, session, flows = [], selecte
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-<<<<<<< HEAD
         {isEdit && (
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Scripture</label>
@@ -96,18 +95,6 @@ export function SessionForm({ churchId, churchSlug, session, flows = [], selecte
             />
           </div>
         )}
-=======
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Scripture</label>
-          <input
-            name="scripture_ref"
-            type="text"
-            defaultValue={session?.scripture_ref ?? ''}
-            placeholder="e.g. John 3:16"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-          />
-        </div>
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Scheduled delivery date</label>

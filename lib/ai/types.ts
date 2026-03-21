@@ -170,11 +170,8 @@ export interface VerseInsightInput {
 export interface InsightItem {
   title: string
   content: string
-<<<<<<< HEAD
   source_label?: string
   source_url?: string
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }
 
 export interface RawVerseInsight {
@@ -200,4 +197,13 @@ export interface LessonSummaryResult extends AIResultMeta {
   estimated_minutes: number
   key_theme: string
   titles: string[]
+}
+
+
+export interface SplitNotesInput {
+  notes: { id: string; content: string }[]
+}
+
+export interface SplitNotesResult extends AIResultMeta {
+  cards: { sourceId: string; content: string; category: string }[]
 }

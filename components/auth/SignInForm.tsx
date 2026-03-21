@@ -37,7 +37,6 @@ export function SignInForm({ returnTo, error }: Props) {
         redirectTo: `${window.location.origin}/api/auth/callback?returnTo=${encodeURIComponent(defaultDest)}`,
         scopes: 'https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file',
         queryParams: { access_type: 'offline', prompt: 'consent' },
-
       },
     })
     if (authError) {
@@ -110,4 +109,3 @@ function GoogleIcon() {
     </svg>
   )
 }
-

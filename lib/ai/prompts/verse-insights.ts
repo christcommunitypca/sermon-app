@@ -12,11 +12,7 @@
 import type { PromptPayload } from '@/lib/ai/types'
 import type { VerseInsightInput } from '@/lib/ai/types'
 
-<<<<<<< HEAD
 export const VERSION = 'v1.4'
-=======
-export const VERSION = 'v1.2'
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
 export const CATEGORIES = [
   'word_study',
@@ -36,7 +32,6 @@ export const CATEGORY_BATCHES: InsightCategory[][] = [
   ['practical', 'theology_by_tradition', 'application', 'quotes'],
 ]
 
-<<<<<<< HEAD
 // const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
 //   word_study:
 //     'Key Greek (NT) or Hebrew (OT) words. For each: title = "originalWord (transliteration)" e.g. "λόγoς (logos)" or "חֶסֶד (hesed)". Content = why this word matters theologically. Only flag genuinely significant words.',
@@ -69,23 +64,6 @@ const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
     'One concrete application grounded in the verse, not generic.',
   quotes:
     'Short genuine quote from a respected theologian in the teacher tradition. Title: "Name (dates)". Content: quote only. Include source_label and source_url only when known.',
-=======
-const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
-  word_study:
-    'Key Greek (NT) or Hebrew (OT) words. For each: title = "originalWord (transliteration)" e.g. "λόγος (logos)" or "חֶסֶד (hesed)". Content = why this word matters theologically. Only flag genuinely significant words.',
-  cross_refs:
-    'Related Bible verses — just the reference (e.g. "Rom 5:1") and a single phrase on why it connects. No quotes, no explanation paragraphs. Prefer less-obvious connections over the standard ones.',
-  practical:
-    'A concrete analogy or illustration accessible to all ages. One clear image, theologically precise.',
-  theology_by_tradition:
-    'Where traditions meaningfully diverge on this verse. Only include traditions with a real stake here.',
-  context:
-    'One historical or cultural fact that would surprise most readers and directly illuminates meaning.',
-  application:
-    'One specific, concrete application grounded in the passage\'s own logic — not generic.',
-  quotes:
-    'Memorable quotes from respected theologians in the teacher\'s tradition that illuminate this verse. Format title as "Theologian Name (dates)" e.g. "John Calvin (1509–1564)". Content = the quote itself (15–40 words). Only include genuine, historically attested quotes — no fabrications. Max 2 per verse.',
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 }
 
 // Build a prompt for one batch of 3 categories across all verses.
@@ -110,7 +88,6 @@ export function buildBatchPrompt(
     .join('\n')
 
   // If teacher selected specific words, make sure the instruction is prominent
-<<<<<<< HEAD
    const hasSelectedWords = Object.values(input.selectedWords ?? {}).some(w => w.length > 0)
   
    // const traditionClause = tradition
@@ -124,12 +101,6 @@ export function buildBatchPrompt(
     const wordStudyInstruction = hasSelectedWords
     ? `- WORD STUDY: selectedWords only, ordered, no extras. Contextual lexical sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
     : `- WORD STUDY: key passage words/phrases. Contextual lexical sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
-=======
-  const hasSelectedWords = Object.values(input.selectedWords ?? {}).some(w => w.length > 0)
-  const wordStudyInstruction = hasSelectedWords
-    ? '\n- WORD STUDY: The teacher has selected specific words for study (marked "Study these specific words"). For those verses, focus word_study items ONLY on the specified words, in the order given.'
-    : ''
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
   const categorySpec = categories.map(cat =>
     `"${cat}": ${CATEGORY_DESCRIPTIONS[cat]}`
@@ -147,21 +118,16 @@ Response — a JSON array, no markdown, no preamble:
     "verse_ref": "Book Chapter:Verse",
     "category": "category_name",
     "items": [
-<<<<<<< HEAD
             {
         "title": "Short label",
         "content": "1-2 sentences max",
         "source_label": "Optional source title",
         "source_url": "Optional direct URL"
       }
-=======
-      { "title": "Short label", "content": "1-2 sentences max" }
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
     ]
   }
 ]
 
-<<<<<<< HEAD
 // Rules:
 // - Return ONLY the JSON array.
 // - One object per verse per category (${verses.length} verses × ${categories.length} categories = ${verses.length * categories.length} objects total).
@@ -175,13 +141,10 @@ Response — a JSON array, no markdown, no preamble:
 // - If you are unsure of a source, omit source_label and source_url rather than guessing.
 // - Never fabricate quotes, citations, or URLs.
 
-=======
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 Rules:
 - Return ONLY the JSON array.
 - One object per verse per category (${verses.length} verses × ${categories.length} categories = ${verses.length * categories.length} objects total).
 - Verses: ${verseRefs}
-<<<<<<< HEAD
 - Categories:
 ${categorySpec}
 - items: MAX 2 per object.
@@ -201,19 +164,6 @@ const user = `Passage: ${sessionTitle} (${sessionType})
 ${passageText}
 
 Generate ${categories.join(', ')}. JSON only.`
-=======
-- Categories and what they mean:
-${categorySpec}
-- items: MAX 3 per object. 1-2 sentences per item. Concise and specific.
-- Cross-verse reasoning encouraged — insights may reference other verses in the passage.
-- Teacher's tradition: ${tradition}. Weight application and theology_by_tradition accordingly.`
-
-  const user = `Passage: ${sessionTitle} (${sessionType})
-
-${passageText}
-
-Generate ${categories.join(' + ')} insights. Return JSON array only.`
->>>>>>> f06f0a0aaec959e258a7d2c1d063c274c314df2e
 
   return { system, user, version: VERSION, temperature: 0.3 }
 }

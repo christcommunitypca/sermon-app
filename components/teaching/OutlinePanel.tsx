@@ -24,6 +24,8 @@ import { generateOutlineAction } from '@/app/actions/ai'
 import {
   buildOutlinePromptParts,
   renderOutlinePromptForHuman,
+  renderOutlinePromptForLLM,
+  type OutlineSelectedFlow,
   type OutlineSelectedInsight,
 } from '@/lib/outlinePrompt'
 
@@ -63,7 +65,7 @@ interface Props {
   churchSlug: string
   blocks: OutlineBlock[]
   onBlocksChange: (blocks: OutlineBlock[]) => void
-  flowStructure?: { type: string; label: string }[]
+  selectedFlow?: OutlineSelectedFlow | null
   hasValidAIKey: boolean
   estimatedDuration: number | null
   initialVerses: Array<{ verse_ref: string; text: string }>
@@ -89,7 +91,7 @@ interface Props {
 
 export function OutlinePanel({
   outlineId, sessionId, churchId, churchSlug,
-  blocks, onBlocksChange, flowStructure, hasValidAIKey,
+  blocks, onBlocksChange, selectedFlow, hasValidAIKey,
   estimatedDuration, sessionTitle, sessionType, sessionNotes, scriptureRef, initialVerses, initialInsights, initialVerseNotes,
   onInsightsChange, onSaveTrigger, onAITrigger, onRegisterAIContext, pending, onItemPlaced, 
   onPendingFromRef, onCancelPending, steps, activeReferenceTab, onReferenceTabChange,  activeSectionVerseRefs,
@@ -351,26 +353,35 @@ export function OutlinePanel({
     verseNotesForAI?: Record<string, string>
   ) {
     const parts = buildOutlinePromptParts({
-      flowStructure,
+      selectedFlow,
       selectedInsights,
       verseNotesForAI,
       thoughts: [],
       sessionEstimatedDuration: estimatedDuration,
     })
-  
+
+    const sessionForPreview = {
+      title: sessionTitle || 'Preview from current teaching workspace',
+      type: sessionType || 'Sermon',
+      scriptureRef: scriptureRef ?? initialVerses?.[0]?.verse_ref ?? null,
+      notes: sessionNotes ?? null,
+      estimatedDuration,
+    }
+
     const preview = renderOutlinePromptForHuman({
-      session: {
-        title: 'Preview from current teaching workspace',
-        type: 'Sermon',
-        scriptureRef: initialVerses?.[0]?.verse_ref ?? null,
-        notes: null,
-        estimatedDuration,
-      },
+      session: sessionForPreview,
       parts,
+      version: 'preview',
     })
-  
+
+    const llmPrompt = renderOutlinePromptForLLM({
+      session: sessionForPreview,
+      parts,
+      version: 'preview',
+    })
+
     setPromptPreview(preview)
-    setLlmPromptPreview('The exact LLM prompt is now generated in the prompt builder. This preview shows the same content in readable form.')
+    setLlmPromptPreview(`${llmPrompt.system}\n\n----- USER -----\n\n${llmPrompt.user}`)
     setShowPromptModal(true)
   }
   
@@ -382,20 +393,14 @@ export function OutlinePanel({
     setAILoading(true)
     setAIError(null)
     try {
-      const parts = buildOutlinePromptParts({
-        flowStructure,
-        selectedInsights,
-        verseNotesForAI,
-      })
-  
       const data = await generateOutlineAction({
         sessionId,
         churchId,
-        flowStructure: parts.flowStructure,
-        selectedInsights: parts.selectedInsights,
-        verseNotes: parts.verseNotes,
+        selectedFlow,
+        selectedInsights,
+        verseNotes: verseNotesForAI,
       })
-  
+
       if (data.error || !data.blocks) {
         setAIError(data.error ?? 'Generation failed')
       } else {
@@ -1365,7 +1370,7 @@ useEffect(() => {
               </div>
               {Object.entries(insights).map(([vRef, cats]) => (
                 <div key={vRef}>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">{vRef}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">{vRef === 'session:shared' ? 'Session Research' : vRef}</p>
                   {Object.entries(cats).map(([cat, items]) =>
                     items.map((item, i) => {
                       const key = `${vRef}||${cat}||${i}`

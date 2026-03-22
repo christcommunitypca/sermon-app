@@ -11,6 +11,7 @@ import {
   buildOutlinePromptParts,
   renderOutlinePromptForHuman,
   renderOutlinePromptForLLM,
+  type OutlineSelectedFlow,
 } from '@/lib/outlinePrompt'
 import { OutlinePanel, DraftOutlineModal, PromptPreviewModal } from './OutlinePanel'
 export interface PendingItem {
@@ -70,7 +71,7 @@ interface Props {
   churchSlug:        string
   outlineId:         string
   initialBlocks:     OutlineBlock[]
-  flowStructure?:    { type: string; label: string }[]
+  selectedFlow?:    OutlineSelectedFlow | null
   hasValidAIKey:     boolean
   scriptureRef:      string | null
   initialStudyMode: 'vbv' | 'pericope'
@@ -128,7 +129,7 @@ function verseRefsForSection(verses: VerseData[] | null, sections: SectionHeader
 
 export function TeachingWorkspace({
   sessionId, churchId, churchSlug, outlineId,
-  initialBlocks, flowStructure, hasValidAIKey,
+  initialBlocks, selectedFlow, hasValidAIKey,
   scriptureRef, initialStudyMode, estimatedDuration,
   initialVerses, initialInsights, initialVerseNotes,
   isPublished, sessionTitle, scheduledDate,
@@ -167,7 +168,16 @@ export function TeachingWorkspace({
   const [showPromptPreviewModal, setShowPromptPreviewModal] = useState(false)
   const [humanPromptPreview, setHumanPromptPreview] = useState('')
   const [llmPromptPreview, setLlmPromptPreview] = useState('')
-
+  const legacyFlowStructure = useMemo(
+    () =>
+      selectedFlow?.steps?.map(step => ({
+        type: step.suggestedBlockType ?? 'point',
+        label: step.title,
+      })) ?? [],
+    [selectedFlow]
+  )
+  
+  
   useEffect(() => {
     if (pericSections.length > 0 && !pericopeSetupComplete) setPericopeSetupComplete(true)
   }, [pericSections, pericopeSetupComplete])
@@ -210,7 +220,7 @@ export function TeachingWorkspace({
       setOutlineSectionRefs(sectionChips[activeSectionIdx].refs)
     }
     //setMode('outline')
-    if (openAssist) setQueueOutlineAssist(true)
+  //removed stale outline assist queue behavior
   }
   
   function handleSelectSection(idx: number) {
@@ -405,7 +415,7 @@ export function TeachingWorkspace({
     outlineId={outlineId}
     blocks={blocks}
     onBlocksChange={setBlocks}
-    flowStructure={flowStructure}
+    selectedFlow={selectedFlow}
     hasValidAIKey={hasValidAIKey}
     estimatedDuration={estimatedDuration}
     initialVerses={verses ?? []}
@@ -436,7 +446,7 @@ export function TeachingWorkspace({
     scriptureRef={localScriptureRef}
     onScriptureRefSet={setLocalScriptureRef}
     hasValidAIKey={hasValidAIKey}
-    flowStructure={flowStructure}
+    flowStructure={legacyFlowStructure}
     estimatedDuration={estimatedDuration}
     verses={verses}
     insights={insights}
@@ -484,7 +494,7 @@ export function TeachingWorkspace({
         const data = await generateOutlineAction({
           sessionId,
           churchId,
-          flowStructure,
+          selectedFlow,
           verseNotes: notesForAI,
           selectedInsights,
         })
@@ -504,7 +514,7 @@ export function TeachingWorkspace({
       }
     
       const parts = buildOutlinePromptParts({
-        flowStructure,
+        selectedFlow,
         selectedInsights,
         verseNotesForAI: notesForAI,
         thoughts: [],
@@ -580,6 +590,8 @@ export function TeachingWorkspace({
     onClose={() => setShowPromptPreviewModal(false)}
   />
 )}
+
+
 
 
       {showExport && (

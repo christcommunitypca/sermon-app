@@ -21,6 +21,7 @@ import {
   splitVerseNotesAction,
 } from '@/app/actions/verse-study'
 import { toggleInsightFlagAction } from '@/app/actions/verse-study'
+import { parseWordStudyTitle } from '@/lib/word-study'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type InsightItem = {
@@ -33,6 +34,28 @@ type InsightItem = {
 }
 type Insights    = Record<string, Record<string, InsightItem[]>>
 type SaveState   = 'idle' | 'saving' | 'saved' | 'error'
+const SHARED_INSIGHTS_KEY = 'session:shared'
+type DisplayInsightItem = InsightItem & { __sourceRef: string; __sourceIndex: number; __shared?: boolean }
+
+function getDisplayInsightItems(
+  insights: Insights,
+  scopeRef: string,
+  category: CategoryKey
+): DisplayInsightItem[] {
+  const specific = (insights[scopeRef]?.[category] ?? []).map((item, index) => ({
+    ...item,
+    __sourceRef: scopeRef,
+    __sourceIndex: index,
+  }))
+  const shared = (insights[SHARED_INSIGHTS_KEY]?.[category] ?? []).map((item, index) => ({
+    ...item,
+    __sourceRef: SHARED_INSIGHTS_KEY,
+    __sourceIndex: index,
+    __shared: true,
+  }))
+
+  return [...specific, ...shared]
+}
 
 const CATEGORIES = [
   { key: 'word_study',            label: 'Word Study'      },
@@ -638,7 +661,7 @@ export function PericopePanel({
   function renderResearchPane(block: (typeof blocks)[number]) {
     const sectionKey = block.sectionKey
     const category = activeCategoryBySection[sectionKey] ?? 'context'
-    const items = insights[sectionKey]?.[category] ?? []
+    const items = getDisplayInsightItems(insights, sectionKey, category)
     const selectedWords = selectedWordsBySection[sectionKey] ?? []
     const displayWords = selectedWords.slice(0, 5)
     const showWordTools = showWordToolsBySection[sectionKey] ?? false
@@ -697,7 +720,7 @@ export function PericopePanel({
 
         <div className="flex items-center gap-1 flex-wrap">
           {CATEGORIES.map(c => {
-            const catItems = insights[sectionKey]?.[c.key] ?? []
+            const catItems = getDisplayInsightItems(insights, sectionKey, c.key)
             const isActive = category === c.key
             return (
               <button
@@ -728,17 +751,17 @@ export function PericopePanel({
                   onToggleFlag={(newFlagged) => {
                     onInsightsChange({
                       ...insights,
-                      [sectionKey]: {
-                        ...(insights[sectionKey] ?? {}),
-                        [category]: (insights[sectionKey]?.[category] ?? []).map((it, itemIdx) => itemIdx === i ? { ...it, is_flagged: newFlagged } : it),
+                      [item.__sourceRef]: {
+                        ...(insights[item.__sourceRef] ?? {}),
+                        [category]: (insights[item.__sourceRef]?.[category] ?? []).map((it, itemIdx) => itemIdx === item.__sourceIndex ? { ...it, is_flagged: newFlagged } : it),
                       },
                     })
-                    toggleInsightFlagAction(sessionId, sectionKey, category, i, newFlagged).catch(() => null)
+                    toggleInsightFlagAction(sessionId, item.__sourceRef, category, item.__sourceIndex, newFlagged).catch(() => null)
                   }}
                   onPlace={() => {
                     const content = item.title ? `${item.title} — ${item.content}` : item.content
                     onItemPlaced({
-                      id: `${sectionKey}-${category}-${i}`,
+                      id: `${item.__sourceRef}-${category}-${item.__sourceIndex}`,
                       content,
                       type: category === 'application' ? 'application' : category === 'practical' ? 'illustration' : 'sub_point',
                       source: 'research',
@@ -975,7 +998,11 @@ function ResearchItem({
       </div>
 
       {item.title && (
-        <p className="text-xs font-semibold text-slate-700 mb-0.5">{item.title}</p>
+        item.title.includes('|') || (item as any).metadata?.word ? (
+          <WordStudyTitle title={item.title} metadataWord={(item as any).metadata?.word as string | undefined} />
+        ) : (
+          <p className="text-xs font-semibold text-slate-700 mb-0.5">{item.title}</p>
+        )
       )}
       <p className="text-sm text-slate-600 leading-relaxed">{item.content}</p>
 
@@ -990,6 +1017,19 @@ function ResearchItem({
           {item.source_label || 'Source'}
         </a>
       )}
+    </div>
+  )
+}
+
+function WordStudyTitle({ title, metadataWord }: { title: string; metadataWord?: string }) {
+  const parsed = parseWordStudyTitle(title, metadataWord)
+  if (!parsed.original) return <p className="text-xs font-semibold text-slate-700 mb-0.5">{parsed.fallbackTitle}</p>
+  return (
+    <div className="flex flex-wrap items-baseline gap-1.5 mb-0.5">
+      {parsed.english && <span className="text-xs font-semibold text-slate-700">{parsed.english}</span>}
+      {parsed.english && <span className="text-xs text-slate-400">|</span>}
+      <span className="text-sm font-bold text-slate-800">{parsed.original}</span>
+      {parsed.transliteration && <span className="text-xs text-slate-500 italic">{parsed.transliteration}</span>}
     </div>
   )
 }

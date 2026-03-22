@@ -1,6 +1,16 @@
-export type OutlineFlowStep = {
-  type: string
-  label: string
+export type OutlineSelectedFlowStep = {
+  id?: string
+  title: string
+  promptHint?: string | null
+  suggestedBlockType?: string | null
+}
+
+export type OutlineSelectedFlow = {
+  id?: string
+  name: string
+  description?: string | null
+  explanation?: string | null
+  steps: OutlineSelectedFlowStep[]
 }
 
 export type OutlineSelectedInsight = {
@@ -12,7 +22,8 @@ export type OutlineSelectedInsight = {
 
 export type OutlinePromptParts = {
   requestRules: string[]
-  flowHint: string
+  flowSummaryText: string
+  flowDetailText: string
   durationRule: string
   durationUser: string
   thoughtText: string
@@ -21,7 +32,7 @@ export type OutlinePromptParts = {
 }
 
 export function buildOutlinePromptParts(args: {
-  flowStructure?: OutlineFlowStep[]
+  selectedFlow?: OutlineSelectedFlow | null
   selectedInsights?: OutlineSelectedInsight[]
   verseNotesForAI?: Record<string, string>
   thoughts?: Array<{ content?: string | null }>
@@ -33,9 +44,31 @@ export function buildOutlinePromptParts(args: {
       .map(t => `- ${t.content}`)
       .join('\n') || 'None provided.'
 
-  const flowHint = args.flowStructure?.length
-    ? `Structure your outline using these sections in order: ${args.flowStructure.map(f => f.label).join(', ')}.`
-    : 'Use a standard sermon structure: Introduction, Main Points, Application, Conclusion.'
+  const selectedFlow = args.selectedFlow ?? null
+
+  const flowSummaryText =
+    selectedFlow?.steps?.length
+      ? `Follow the selected sermon flow "${selectedFlow.name}" and preserve its movement in order.`
+      : 'No specific sermon flow has been selected. Use a clear, faithful sermon structure with natural movement.'
+
+  const flowDetailText =
+    selectedFlow?.steps?.length
+      ? [
+          `Flow name: ${selectedFlow.name}`,
+          selectedFlow.description ? `Short description: ${selectedFlow.description}` : '',
+          selectedFlow.explanation ? `Explanation: ${selectedFlow.explanation}` : '',
+          'Ordered flow steps:',
+          ...selectedFlow.steps.map((step, idx) => {
+            const hint = step.promptHint ? ` — ${step.promptHint}` : ''
+            const blockType = step.suggestedBlockType
+              ? ` [suggested outline block: ${step.suggestedBlockType}]`
+              : ''
+            return `${idx + 1}. ${step.title}${hint}${blockType}`
+          }),
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : 'No sermon flow selected.'
 
   const durationRule = args.sessionEstimatedDuration
     ? `- CRITICAL: The total of all estimated_minutes values MUST sum to approximately ${args.sessionEstimatedDuration} minutes. Fit the outline to this target. Do not ignore this constraint.`
@@ -52,10 +85,10 @@ export function buildOutlinePromptParts(args: {
         .join('\n')
     : ''
 
-    const selectedInsightsText = args.selectedInsights?.length
+  const selectedInsightsText = args.selectedInsights?.length
     ? args.selectedInsights
         .map(i => {
-          const prettyRef = i.verseRef.replace(/^pericope:/, '')
+          const prettyRef = i.verseRef === 'session:shared' ? 'Session Research' : i.verseRef.replace(/^pericope:/, '')
           return `[${prettyRef} / ${i.category}] ${i.title ? i.title + ': ' : ''}${i.content}`
         })
         .join('\n')
@@ -73,8 +106,11 @@ export function buildOutlinePromptParts(args: {
       '- high = clear scriptural direction',
       '- medium = reasonable interpretation',
       '- low = suggestion needing pastor review',
+      '- Respect the selected sermon flow when one is provided, but adapt naturally to the text rather than forcing awkward sections.',
+      '- Let the biblical text control the content, while the selected flow controls the movement and ordering.',
     ],
-    flowHint,
+    flowSummaryText,
+    flowDetailText,
     durationRule,
     durationUser,
     thoughtText,
@@ -100,7 +136,7 @@ export function renderOutlinePromptForLLM(args: {
 
 Rules:
 ${parts.requestRules.join('\n')}
-- ${parts.flowHint}
+- ${parts.flowSummaryText}
 ${parts.durationRule}`
 
   const user = `Create a preaching outline for:
@@ -110,6 +146,9 @@ Type: ${session.type}
 Scripture: ${session.scriptureRef ?? 'Not specified'}
 ${parts.durationUser}
 Notes: ${session.notes ?? 'None'}
+
+Selected sermon flow:
+${parts.flowDetailText}
 
 Thought captures / raw ideas from the pastor:
 ${parts.thoughtText}${parts.verseNotesText ? `
@@ -139,9 +178,12 @@ export function renderOutlinePromptForHuman(args: {
     estimatedDuration?: number | null
   }
   parts: OutlinePromptParts
-  version: string
+  version?: string
 }) {
-  const llm = renderOutlinePromptForLLM(args)
+  const llm = renderOutlinePromptForLLM({
+    ...args,
+    version: args.version ?? 'preview',
+  })
 
   const lines: string[] = []
 
@@ -172,6 +214,7 @@ function formatPromptText(text: string): string[] {
   const out: string[] = []
 
   let inRules = false
+  let inFlowSection = false
 
   for (const rawLine of rawLines) {
     const line = rawLine.trim()
@@ -184,16 +227,14 @@ function formatPromptText(text: string): string[] {
     if (line === 'Rules:') {
       out.push('### Rules')
       inRules = true
+      inFlowSection = false
       continue
     }
 
-    if (
-      line === 'FLOW STRUCTURE' ||
-      line === 'VERSE NOTES' ||
-      line === 'SELECTED INSIGHTS'
-    ) {
-      out.push(`### ${toTitleCase(line)}`)
+    if (line === 'Selected sermon flow:') {
+      out.push('### Selected Sermon Flow')
       inRules = false
+      inFlowSection = true
       continue
     }
 
@@ -206,6 +247,7 @@ function formatPromptText(text: string): string[] {
     ) {
       out.push(`- ${line}`)
       inRules = false
+      inFlowSection = false
       continue
     }
 
@@ -216,6 +258,22 @@ function formatPromptText(text: string): string[] {
     ) {
       out.push(`### ${line}`)
       inRules = false
+      inFlowSection = false
+      continue
+    }
+
+    if (
+      line.startsWith('Flow name:') ||
+      line.startsWith('Short description:') ||
+      line.startsWith('Explanation:') ||
+      line === 'Ordered flow steps:'
+    ) {
+      out.push(`- ${line}`)
+      continue
+    }
+
+    if (/^\d+\.\s/.test(line)) {
+      out.push(`  ${line}`)
       continue
     }
 
@@ -229,7 +287,7 @@ function formatPromptText(text: string): string[] {
       continue
     }
 
-    if (inRules) {
+    if (inRules || inFlowSection) {
       out.push(`- ${line}`)
       continue
     }
@@ -238,12 +296,4 @@ function formatPromptText(text: string): string[] {
   }
 
   return out
-}
-
-function toTitleCase(value: string) {
-  return value
-    .toLowerCase()
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
 }

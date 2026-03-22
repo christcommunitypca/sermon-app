@@ -38,13 +38,14 @@ function buildWordStudyPrompt(input: ResearchInput): PromptPayload {
   const system = `You are a biblical scholar helping a pastor prepare to preach.
 Return ONLY a JSON array. No markdown, no explanation.
 Each item: { title, content, subcategory, confidence, metadata }
-- title: the English word as it appears in the passage (e.g. "grace", "justified", "abide")
+- title: "English | originalWord (transliteration)". Prefer actual Greek or Hebrew characters when known. Example: "Worship | שָׁחָה (shachah)" or "Word | λόγος (logos)".
 - content: 3-5 sentences. Lead with what this word actually meant in its original context,
   then explain what it means in THIS passage specifically, then why it matters for preaching.
   Be a scholar helping a practitioner, not writing a lexicon entry.
 - subcategory: "word"
 - confidence: "high" | "medium" | "low"
 - metadata:
+  - english_word: the English word or phrase from the passage
   - word: the original language spelling (Greek or Hebrew characters if possible, else transliteration)
   - original_language: "hebrew" | "greek" | "aramaic"
   - strongs_ref: Strong's number if confidently known (e.g. "G5485"), else null

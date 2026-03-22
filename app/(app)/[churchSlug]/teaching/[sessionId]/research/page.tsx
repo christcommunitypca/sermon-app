@@ -2,8 +2,8 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { getResearchItemsForSession } from '@/lib/research'
 import { ResearchWorkspace } from '@/components/research/ResearchWorkspace'
+import { ensureSharedStudyInsightsFromResearch, getUnifiedStudyItemsForSession } from '@/lib/study-content'
 import { hasValidKey } from '@/lib/ai/key'
 import { getActiveProviderName } from '@/lib/ai/providers/resolver'
 import { ChevronLeft } from 'lucide-react'
@@ -31,7 +31,13 @@ export default async function ResearchPage({ params }: Props) {
 
   const hasValidAIKey = await hasValidKey(user.id, getActiveProviderName())
 
-  const items = await getResearchItemsForSession(sessionId, user.id)
+  await ensureSharedStudyInsightsFromResearch({
+    sessionId,
+    churchId: church.id,
+    teacherId: user.id,
+  })
+
+  const items = await getUnifiedStudyItemsForSession({ sessionId, teacherId: user.id })
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">

@@ -51,7 +51,7 @@ export const CATEGORY_BATCHES: InsightCategory[][] = [
 
 const CATEGORY_DESCRIPTIONS: Record<InsightCategory, string> = {
   word_study:
-    'Lexical insight on significant original-language words. Title: "English | Greek/Hebrew (translit)". Content: most likely contextual sense and why it matters.',
+    'Lexical insight on significant original-language words. Title: "English | originalWord (transliteration)". Prefer actual Greek or Hebrew characters when known, not just "Greek" or "Hebrew" plus transliteration. Example: "Worship | שָׁחָה (shachah)". Content: most likely contextual sense and why it matters.',
   cross_refs:
     'Related Bible references. Title: verse reference only. Content: one short phrase explaining the connection.',
   practical:
@@ -94,13 +94,13 @@ export function buildBatchPrompt(
   // ? ` Interpret in line with this tradition where relevant: ${tradition}.`
   // : ''
   // const wordStudyInstruction = hasSelectedWords
-  // ? `- WORD STUDY: selectedWords only, ordered, no extras. Lexical analysis. Give the most likely contextual sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
-  // : `- WORD STUDY: key passage words/phrases. Lexical analysis. Give the most likely contextual sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
+  // ? `- WORD STUDY: selectedWords only, ordered, no extras. Lexical analysis. Give the most likely contextual sense.${traditionClause} Title: English | originalWord (transliteration). Prefer actual Greek or Hebrew characters when known, not just language name plus transliteration. Example: Worship | שָׁחָה (shachah).`
+  // : `- WORD STUDY: key passage words/phrases. Lexical analysis. Give the most likely contextual sense.${traditionClause} Title: English | originalWord (transliteration). Prefer actual Greek or Hebrew characters when known, not just language name plus transliteration. Example: Worship | שָׁחָה (shachah).`
   
     const traditionClause = tradition ? ` ${tradition}.` : ''
     const wordStudyInstruction = hasSelectedWords
-    ? `- WORD STUDY: selectedWords only, ordered, no extras. Contextual lexical sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
-    : `- WORD STUDY: key passage words/phrases. Contextual lexical sense.${traditionClause} Title: English | Greek/Hebrew (translit).`
+    ? `- WORD STUDY: selectedWords only, ordered, no extras. Contextual lexical sense.${traditionClause} Title: English | originalWord (transliteration). Prefer actual Greek or Hebrew characters when known, not just language name plus transliteration. Example: Worship | שָׁחָה (shachah).`
+    : `- WORD STUDY: key passage words/phrases. Contextual lexical sense.${traditionClause} Title: English | originalWord (transliteration). Prefer actual Greek or Hebrew characters when known, not just language name plus transliteration. Example: Worship | שָׁחָה (shachah).`
 
   const categorySpec = categories.map(cat =>
     `"${cat}": ${CATEGORY_DESCRIPTIONS[cat]}`

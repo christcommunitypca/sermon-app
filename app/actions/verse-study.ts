@@ -15,6 +15,7 @@ import {
 import { getUserTradition } from '@/lib/research'
 import { getFlatRenderOrder } from '@/lib/outline'
 import type { OutlineBlock, VerseNote } from '@/types/database'
+import { ensureSharedStudyInsightsFromResearch } from '@/lib/study-content'
 
 type InsightItem = {
   title: string
@@ -47,6 +48,21 @@ export async function fetchVerseDataAction(
 
   try {
     const verses = await fetchPassage(scriptureRef)
+
+    const { data: session } = await supabaseAdmin
+      .from('teaching_sessions')
+      .select('church_id')
+      .eq('id', sessionId)
+      .eq('teacher_id', user.id)
+      .single()
+
+    if (session?.church_id) {
+      await ensureSharedStudyInsightsFromResearch({
+        sessionId,
+        churchId: session.church_id,
+        teacherId: user.id,
+      })
+    }
 
     const [{ data: insightRows }, { data: noteRows }] = await Promise.all([
       supabaseAdmin

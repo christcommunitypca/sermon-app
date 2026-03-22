@@ -5,8 +5,39 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { writeAuditLog, AUDIT_ACTIONS } from '@/lib/audit'
-import { ensureOutline } from '@/lib/teaching'
-import { SessionType, SessionStatus, Visibility } from '@/types/database'
+import {
+  ensureOutline,
+  buildSelectedFlowSnapshot,
+} from '@/lib/teaching'
+import {
+  SessionType,
+  SessionStatus,
+  Visibility,
+  Flow,
+} from '@/types/database'
+
+async function resolveSelectedFlow(args: {
+  flowId: string | null
+  churchId?: string | null
+  teacherId: string
+}): Promise<Flow | null> {
+  const { flowId, churchId, teacherId } = args
+  if (!flowId) return null
+
+  let query = supabaseAdmin
+    .from('flows')
+    .select('*')
+    .eq('id', flowId)
+    .eq('teacher_id', teacherId)
+    .eq('is_archived', false)
+
+  if (churchId) {
+    query = query.eq('church_id', churchId)
+  }
+
+  const { data } = await query.single()
+  return (data as Flow | null) ?? null
+}
 
 // ── Create session ─────────────────────────────────────────────────────────────
 export async function createSessionAction(formData: FormData) {
@@ -15,6 +46,12 @@ export async function createSessionAction(formData: FormData) {
 
   const churchId = formData.get('churchId') as string
   const churchSlug = formData.get('churchSlug') as string
+  const flowIdRaw = (formData.get('flow_id') as string | null)?.trim() || null
+  const selectedFlow = await resolveSelectedFlow({
+    flowId: flowIdRaw,
+    churchId,
+    teacherId: user.id,
+  })
 
   const { data: session, error } = await supabaseAdmin
     .from('teaching_sessions')
@@ -23,13 +60,15 @@ export async function createSessionAction(formData: FormData) {
       teacher_id: user.id,
       type: formData.get('type') as SessionType,
       title: (formData.get('title') as string).trim(),
-      scripture_ref: null, // Added manually on teaching page
+      scripture_ref: (formData.get('scripture_ref') as string)?.trim() || null,
       estimated_duration: formData.get('estimated_duration')
         ? parseInt(formData.get('estimated_duration') as string)
         : null,
       notes: (formData.get('notes') as string)?.trim() || null,
       visibility: (formData.get('visibility') as Visibility) ?? 'church',
       status: 'draft',
+      selected_flow_id: selectedFlow?.id ?? null,
+      selected_flow_snapshot: selectedFlow ? buildSelectedFlowSnapshot(selectedFlow) : null,
     })
     .select()
     .single()
@@ -38,7 +77,6 @@ export async function createSessionAction(formData: FormData) {
     throw new Error(error?.message ?? 'Failed to create session')
   }
 
-  // Auto-create an empty outline
   await ensureOutline(session.id, churchId)
 
   void writeAuditLog({
@@ -47,7 +85,12 @@ export async function createSessionAction(formData: FormData) {
     action: AUDIT_ACTIONS.SESSION_CREATED,
     entityType: 'session',
     entityId: session.id,
-    metadata: { title: session.title, type: session.type },
+    metadata: {
+      title: session.title,
+      type: session.type,
+      selected_flow_id: selectedFlow?.id ?? null,
+      selected_flow_name: selectedFlow?.name ?? null,
+    },
   })
 
   redirect(`/${churchSlug}/teaching/${session.id}`)
@@ -61,6 +104,24 @@ export async function updateSessionAction(formData: FormData) {
   const sessionId = formData.get('sessionId') as string
   const churchSlug = formData.get('churchSlug') as string
 
+  const { data: existingSession } = await supabaseAdmin
+    .from('teaching_sessions')
+    .select('church_id')
+    .eq('id', sessionId)
+    .eq('teacher_id', user.id)
+    .single()
+
+  if (!existingSession) {
+    throw new Error('Session not found')
+  }
+
+  const flowIdRaw = (formData.get('flow_id') as string | null)?.trim() || null
+  const selectedFlow = await resolveSelectedFlow({
+    flowId: flowIdRaw,
+    churchId: existingSession.church_id,
+    teacherId: user.id,
+  })
+
   const updates: Record<string, unknown> = {
     title: (formData.get('title') as string).trim(),
     type: formData.get('type') as SessionType,
@@ -71,6 +132,8 @@ export async function updateSessionAction(formData: FormData) {
       : null,
     notes: (formData.get('notes') as string)?.trim() || null,
     visibility: (formData.get('visibility') as Visibility) ?? 'church',
+    selected_flow_id: selectedFlow?.id ?? null,
+    selected_flow_snapshot: selectedFlow ? buildSelectedFlowSnapshot(selectedFlow) : null,
     updated_at: new Date().toISOString(),
   }
 
@@ -125,7 +188,6 @@ export async function updateSessionStatusAction(
 }
 
 // ── Archive session ────────────────────────────────────────────────────────────
-// Archive is the primary removal action. Sets status to 'archived'.
 export async function archiveSessionAction(
   sessionId: string,
   churchId: string,
@@ -169,7 +231,7 @@ export async function unarchiveSessionAction(
     .update({ status: 'draft', updated_at: new Date().toISOString() })
     .eq('id', sessionId)
     .eq('teacher_id', user.id)
-    .eq('status', 'archived')   // only unarchive if actually archived
+    .eq('status', 'archived')
 
   if (error) return { error: error.message }
 
@@ -179,8 +241,6 @@ export async function unarchiveSessionAction(
 }
 
 // ── Delete session ─────────────────────────────────────────────────────────────
-// Delete is restricted: session must be archived first.
-// This enforces the archive-before-delete pattern.
 export async function deleteSessionAction(
   sessionId: string,
   churchId: string,
@@ -189,7 +249,6 @@ export async function deleteSessionAction(
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  // Verify session is archived before allowing deletion
   const { data: session } = await supabaseAdmin
     .from('teaching_sessions')
     .select('status, teacher_id')
@@ -221,10 +280,7 @@ export async function deleteSessionAction(
   redirect(`/${churchSlug}/teaching`)
 }
 
-
 // ── Backfill scheduled_date from series computed date ─────────────────────────
-// Called when viewing a series and a linked session has no scheduled_date
-// but the series has a computable date for that week.
 export async function backfillScheduledDateAction(
   sessionId: string,
   scheduledDate: string
@@ -233,5 +289,5 @@ export async function backfillScheduledDateAction(
     .from('teaching_sessions')
     .update({ scheduled_date: scheduledDate })
     .eq('id', sessionId)
-    .is('scheduled_date', null)   // only update if genuinely blank
+    .is('scheduled_date', null)
 }

@@ -6,11 +6,9 @@ import { getUserTradition } from '@/lib/research'
 import { getSessionWithOutline, getThoughtsForSession, ensureOutline } from '@/lib/teaching'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { saveResearchItems } from '@/lib/research'
+import { rebuildSharedStudyInsightsFromResearch } from '@/lib/study-content'
 import type { ResearchCategory } from '@/types/database'
-import {
-  buildOutlinePromptParts,
-  renderOutlinePromptForLLM,
-} from '@/lib/outlinePrompt'
+import type { OutlineSelectedFlow } from '@/lib/outlinePrompt'
 
 // ── Generate series plan ────────────────────────────────────────────────────
 export async function generateSeriesAction(input: {
@@ -37,8 +35,7 @@ export async function generateSeriesAction(input: {
 export async function generateOutlineAction(input: {
   sessionId: string
   churchId: string
-  flowStructure: { type: string; label: string }[] | undefined
-  // Optional verse-study context passed from Verse by Verse mode
+  selectedFlow?: OutlineSelectedFlow | null
   verseNotes?: Record<string, string>
   selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
 }) {
@@ -50,12 +47,7 @@ export async function generateOutlineAction(input: {
 
   const outline = data.outline ?? await ensureOutline(input.sessionId, input.churchId)
   const thoughts = await getThoughtsForSession(input.sessionId)
-  const parts = buildOutlinePromptParts({
-    flowStructure: input.flowStructure,
-    selectedInsights: input.selectedInsights,
-    verseNotesForAI: input.verseNotes,
-  })
-  
+
   try {
     const result = await generateOutline(user.id, {
       session: {
@@ -66,12 +58,12 @@ export async function generateOutlineAction(input: {
         estimatedDuration: data.session.estimated_duration,
       },
       thoughts: thoughts.map(t => ({ content: t.content ?? '' })),
-      flowStructure: input.flowStructure,
+      selectedFlow: input.selectedFlow,
       outlineId: outline.id,
       verseNotes: input.verseNotes,
       selectedInsights: input.selectedInsights,
     })
-  
+
     return { blocks: result.blocks, model: result.model, error: null }
   } catch (err) {
     if (err instanceof AIError) return { blocks: null, model: null, error: err.message }
@@ -119,9 +111,16 @@ export async function generateResearchAction(input: {
       category: input.category,
     })
 
-    if (!result.items.length) return { items: [], model: result.model, error: null }
+    const saved = result.items.length
+      ? await saveResearchItems(input.sessionId, input.churchId, user.id, input.category, result.items)
+      : []
 
-    const saved = await saveResearchItems(input.sessionId, input.churchId, user.id, input.category, result.items)
+    await rebuildSharedStudyInsightsFromResearch({
+      sessionId: input.sessionId,
+      churchId: input.churchId,
+      teacherId: user.id,
+    })
+
     return { items: saved, model: result.model, error: null }
   } catch (err) {
     if (err instanceof AIError) return { items: null, model: null, error: err.message }

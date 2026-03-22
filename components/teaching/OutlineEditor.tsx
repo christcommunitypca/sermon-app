@@ -167,7 +167,23 @@ export function OutlineEditor({
     setAIError(null)
 
     try {
-      const data = await generateOutlineAction({ sessionId, churchId, flowStructure })
+      const data = await generateOutlineAction({
+        sessionId,
+        churchId,
+        selectedFlow: flowStructure?.length
+          ? {
+              name: 'Selected Flow',
+              description: null,
+              explanation: null,
+              steps: flowStructure.map((block, index) => ({
+                id: String(index),
+                title: block.label,
+                promptHint: null,
+                suggestedBlockType: block.type,
+              })),
+            }
+          : null,
+      })
       if (data.error || !data.blocks) {
         setAIError(data.error ?? 'Generation failed')
       } else {

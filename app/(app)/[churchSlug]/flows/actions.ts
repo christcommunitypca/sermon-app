@@ -4,7 +4,27 @@ import { getActionUser } from '@/lib/supabase/auth-context'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { FlowBlock, SessionType } from '@/types/database'
+import { FlowStep, SessionType } from '@/types/database'
+
+function parseSteps(raw: FormDataEntryValue | null): FlowStep[] {
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function parseRecommendedFor(raw: FormDataEntryValue | null): SessionType[] {
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter(Boolean) as SessionType[] : []
+  } catch {
+    return []
+  }
+}
 
 export async function createFlowAction(formData: FormData) {
   const user = await getActionUser()
@@ -12,12 +32,8 @@ export async function createFlowAction(formData: FormData) {
 
   const churchId = formData.get('churchId') as string
   const churchSlug = formData.get('churchSlug') as string
-  const structureRaw = formData.get('structure') as string
-
-  let structure: FlowBlock[] = []
-  try {
-    structure = JSON.parse(structureRaw)
-  } catch {}
+  const steps = parseSteps(formData.get('steps'))
+  const recommendedFor = parseRecommendedFor(formData.get('recommended_for'))
 
   const { data, error } = await supabaseAdmin
     .from('flows')
@@ -26,7 +42,9 @@ export async function createFlowAction(formData: FormData) {
       teacher_id: user.id,
       name: (formData.get('name') as string).trim(),
       description: (formData.get('description') as string)?.trim() || null,
-      structure,
+      explanation: (formData.get('explanation') as string)?.trim() || null,
+      steps,
+      recommended_for: recommendedFor,
       is_default_for: (formData.get('is_default_for') as SessionType) || null,
     })
     .select()
@@ -43,16 +61,26 @@ export async function updateFlowAction(
   updates: {
     name?: string
     description?: string | null
-    structure?: FlowBlock[]
+    explanation?: string | null
+    steps?: FlowStep[]
+    recommended_for?: SessionType[]
     is_default_for?: SessionType | null
   }
 ): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
+  const payload = {
+    ...updates,
+    name: updates.name?.trim(),
+    description: updates.description?.trim() || null,
+    explanation: updates.explanation?.trim() || null,
+    updated_at: new Date().toISOString(),
+  }
+
   const { error } = await supabaseAdmin
     .from('flows')
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(payload)
     .eq('id', flowId)
     .eq('teacher_id', user.id)
 
@@ -103,7 +131,6 @@ export async function deleteFlowAction(flowId: string, churchId: string, churchS
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  // Verify flow is archived before allowing deletion
   const { data: flow } = await supabaseAdmin
     .from('flows')
     .select('is_archived, teacher_id')
@@ -111,7 +138,7 @@ export async function deleteFlowAction(flowId: string, churchId: string, churchS
     .single()
 
   if (!flow || flow.teacher_id !== user.id) return
-  if (!flow.is_archived) return  // silent guard — UI should only call this on archived flows
+  if (!flow.is_archived) return
 
   await supabaseAdmin
     .from('flows')

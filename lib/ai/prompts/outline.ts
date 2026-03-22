@@ -2,16 +2,19 @@
 // Builds the prompt payload for outline generation.
 // No imports from providers or service — pure prompt construction.
 
-import type { PromptPayload } from '@/lib/ai/types'
-import type { OutlineInput } from '@/lib/ai/types'
+import type { PromptPayload, OutlineInput } from '@/lib/ai/types'
+import {
+  buildOutlinePromptParts,
+  renderOutlinePromptForLLM,
+} from '@/lib/outlinePrompt'
 
-export const VERSION = 'v1.0'
+export const VERSION = 'v1.1'
 
 export function buildPrompt(input: OutlineInput): PromptPayload {
-  const { session, thoughts, flowStructure } = input
+  const { session, thoughts, selectedFlow } = input
 
   const parts = buildOutlinePromptParts({
-    flowStructure,
+    selectedFlow,
     selectedInsights: input.selectedInsights,
     verseNotesForAI: input.verseNotes,
     thoughts,

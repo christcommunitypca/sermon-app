@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, SlidersHorizontal } from 'lucide-react'
 import type { VerseNote } from '@/types/database'
+import { SESSION_SHARED_INSIGHTS_KEY, formatStudyScopeLabel } from '@/lib/study-scopes'
 import type { PendingItem } from './TeachingWorkspace'
+import { parseWordStudyTitle } from '@/lib/word-study'
 
 const BIBLE_BOOK_ORDER: Record<string, number> = {
   genesis:1,exodus:2,leviticus:3,numbers:4,deuteronomy:5,joshua:6,judges:7,ruth:8,
@@ -158,7 +160,7 @@ export function OutlineReference({
             {item.is_flagged && <span className="text-[10px] font-bold px-1 py-0.5 rounded-full bg-slate-200 text-slate-600">✓</span>}
           </div>
           <div className="flex-1 min-w-0">
-            {item.title && (catKey === 'word_study' ? <WordStudyTitle title={item.title} /> : <span className="text-xs font-semibold text-slate-700 block mb-0.5">{item.title}</span>)}
+            {item.title && (catKey === 'word_study' ? <WordStudyTitle title={item.title} metadataWord={(item as any).metadata?.word as string | undefined} /> : <span className="text-xs font-semibold text-slate-700 block mb-0.5">{item.title}</span>)}
             <p className="text-sm text-slate-600 leading-relaxed">{item.content}</p>
           </div>
         </div>
@@ -323,33 +325,48 @@ export function OutlineReference({
         )}
 
         {activeTab === 'ai' && (
-          hasAI ? visibleRefs.map(ref => {
-            const allItems = insights[ref]?.[activeCategory] ?? []
-            const items = allItems.filter(filterItem)
-            if (!items.length) return null
-            return (
-              <div key={`ai-${ref}`}>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">{ref}</p>
-                <div className="space-y-2">
-                  {items.map((item, idx) => renderItem(ref, activeCategory, item, idx))}
+          hasAI ? (<>
+            {(() => {
+              const sharedItems = (insights[SESSION_SHARED_INSIGHTS_KEY]?.[activeCategory] ?? []).filter(filterItem)
+              if (!sharedItems.length) return null
+              return (
+                <div key={`ai-${SESSION_SHARED_INSIGHTS_KEY}`}>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">{formatStudyScopeLabel(SESSION_SHARED_INSIGHTS_KEY)}</p>
+                  <div className="space-y-2">
+                    {sharedItems.map((item, idx) => renderItem(SESSION_SHARED_INSIGHTS_KEY, activeCategory, item, idx))}
+                  </div>
                 </div>
-              </div>
-            )
-          }) : <p className="text-sm text-slate-400">No AI research yet for this passage.</p>
+              )
+            })()}
+            {visibleRefs.map(ref => {
+              const allItems = insights[ref]?.[activeCategory] ?? []
+              const items = allItems.filter(filterItem)
+              if (!items.length) return null
+              return (
+                <div key={`ai-${ref}`}>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">{ref}</p>
+                  <div className="space-y-2">
+                    {items.map((item, idx) => renderItem(ref, activeCategory, item, idx))}
+                  </div>
+                </div>
+              )
+            })}
+          </>) : <p className="text-sm text-slate-400">No AI research yet for this passage.</p>
         )}
       </div>
     </div>
   )
 }
 
-function WordStudyTitle({ title }: { title: string }) {
-  const match = title.match(/^(.+?)\s+\((.+)\)$/)
-  if (!match) return <span className="text-xs font-semibold text-slate-700 block mb-0.5">{title}</span>
-  const [, original, transliteration] = match
+function WordStudyTitle({ title, metadataWord }: { title: string; metadataWord?: string }) {
+  const parsed = parseWordStudyTitle(title, metadataWord)
+  if (!parsed.original) return <span className="text-xs font-semibold text-slate-700 block mb-0.5">{parsed.fallbackTitle}</span>
   return (
-    <span className="flex items-baseline gap-1.5 mb-0.5">
-      <span className="text-sm font-bold text-slate-800">{original}</span>
-      <span className="text-xs text-slate-500 italic">{transliteration}</span>
+    <span className="flex flex-wrap items-baseline gap-1.5 mb-0.5">
+      {parsed.english && <span className="text-xs font-semibold text-slate-700">{parsed.english}</span>}
+      {parsed.english && <span className="text-xs text-slate-400">|</span>}
+      <span className="text-sm font-bold text-slate-800">{parsed.original}</span>
+      {parsed.transliteration && <span className="text-xs text-slate-500 italic">{parsed.transliteration}</span>}
     </span>
   )
 }

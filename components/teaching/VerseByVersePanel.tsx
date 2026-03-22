@@ -23,6 +23,7 @@ import { StepIndicator } from './StepIndicator'
 import type { StepState } from './TeachingWorkspace'
 import type { OutlineBlock, VerseNote } from '@/types/database'
 import type { PendingItem } from './TeachingWorkspace'
+import { parseWordStudyTitle } from '@/lib/word-study'
 
 const CATEGORIES = [
   { key: 'word_study',            label: 'Word Study' },
@@ -37,6 +38,28 @@ const CATEGORIES = [
 type CategoryKey = typeof CATEGORIES[number]['key']
 type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+const SHARED_INSIGHTS_KEY = 'session:shared'
+type DisplayInsightItem = { title: string; content: string; is_flagged?: boolean; used_count?: number; __sourceRef: string; __sourceIndex: number; __shared?: boolean }
+
+function getDisplayInsightItems(
+  insights: Insights,
+  scopeRef: string,
+  category: CategoryKey
+): DisplayInsightItem[] {
+  const specific = (insights[scopeRef]?.[category] ?? []).map((item, index) => ({
+    ...item,
+    __sourceRef: scopeRef,
+    __sourceIndex: index,
+  }))
+  const shared = (insights[SHARED_INSIGHTS_KEY]?.[category] ?? []).map((item, index) => ({
+    ...item,
+    __sourceRef: SHARED_INSIGHTS_KEY,
+    __sourceIndex: index,
+    __shared: true,
+  }))
+
+  return [...specific, ...shared]
+}
 
 interface Props {
   sessionId: string
@@ -467,7 +490,7 @@ function toggleWord(verseRef: string, word: string) {
       {pericopeMode === 'vbv' && !generating && verses?.map((verse: VerseData) => {
         const isCollapsed   = collapsed.has(verse.verse_ref)
         const verseInsights = insights[verse.verse_ref] ?? {}
-        const hasAny        = Object.keys(verseInsights).length > 0
+        const hasAny        = CATEGORIES.some(cat => getDisplayInsightItems(insights, verse.verse_ref, cat.key).length > 0)
         const activeCat: CategoryKey = activeCategory[verse.verse_ref] ?? 'word_study'
         const notes         = verseNotes[verse.verse_ref] ?? []
 
@@ -628,8 +651,8 @@ function toggleWord(verseRef: string, word: string) {
                       {/* Category CATEGORIES */}
                       <div className="flex flex-wrap gap-1 mb-3">
                         {CATEGORIES.map(cat => {
-                          const items    = verseInsights[cat.key]
-                          const has      = items && items.length > 0
+                          const items    = getDisplayInsightItems(insights, verse.verse_ref, cat.key)
+                          const has      = items.length > 0
                           const isActive = activeCat === cat.key
 
                           return (
@@ -650,13 +673,14 @@ function toggleWord(verseRef: string, word: string) {
 
                       {/* Research items — dig deeper prompt + place-in-outline */}
                       <div className="space-y-2">
-                        {(verseInsights[activeCat] ?? []).map((item, i) => (
+                        {getDisplayInsightItems(insights, verse.verse_ref, activeCat).map((item, i) => (
                           <ResearchItemCard
                             key={i}
                             item={item}
                             category={activeCat}
-                            verseRef={verse.verse_ref}
-                            itemIndex={i}
+                            verseRef={item.__sourceRef}
+                            itemIndex={item.__sourceIndex}
+                            isShared={item.__shared}
                             sessionId={sessionId}
                             onFlagToggle={(newFlagged) => {
                               // Optimistically update insights in place
@@ -715,13 +739,14 @@ Please be specific and academically grounded in your response.`
 
 // ── Research item card ─────────────────────────────────────────────────────────
 function ResearchItemCard({
-  item, category, verseRef, itemIndex, sessionId, onFlagToggle,
+  item, category, verseRef, itemIndex, sessionId, isShared, onFlagToggle,
 }: {
   item: { title: string; content: string; is_flagged?: boolean; used_count?: number }
   category: string
   verseRef: string
   itemIndex: number
   sessionId: string
+  isShared?: boolean
   onFlagToggle: (flagged: boolean) => void
 }) {
   const isChecked = !!item.is_flagged
@@ -752,7 +777,7 @@ function ResearchItemCard({
       <div className="flex-1 min-w-0">
         {item.title && (
           category === 'word_study' ? (
-            <WordStudyTitle title={item.title} />
+            <WordStudyTitle title={item.title} metadataWord={(item as any).metadata?.word as string | undefined} />
           ) : category === 'quotes' ? (
             <p className="text-xs font-semibold text-slate-500 italic mb-0.5">{item.title}</p>
           ) : (
@@ -813,15 +838,15 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 // ── Word study title: renders "λόγoς (logos)" with original word prominent ────
-function WordStudyTitle({ title }: { title: string }) {
-  // Expected format: "originalWord (transliteration)" e.g. "λόγoς (logos)"
-  const match = title.match(/^(.+?)\s+\((.+)\)$/)
-  if (!match) return <p className="text-xs font-semibold text-slate-700 mb-0.5">{title}</p>
-  const [, original, transliteration] = match
+function WordStudyTitle({ title, metadataWord }: { title: string; metadataWord?: string }) {
+  const parsed = parseWordStudyTitle(title, metadataWord)
+  if (!parsed.original) return <p className="text-xs font-semibold text-slate-700 mb-0.5">{parsed.fallbackTitle}</p>
   return (
-    <div className="flex items-baseline gap-2 mb-1">
-      <span className="text-base font-bold text-slate-800 leading-tight">{original}</span>
-      <span className="text-xs text-slate-500 font-medium">{transliteration}</span>
+    <div className="flex flex-wrap items-baseline gap-1.5 mb-1">
+      {parsed.english && <span className="text-xs font-semibold text-slate-700">{parsed.english}</span>}
+      {parsed.english && <span className="text-xs text-slate-400">|</span>}
+      <span className="text-base font-bold text-slate-800 leading-tight">{parsed.original}</span>
+      {parsed.transliteration && <span className="text-xs text-slate-500 font-medium">{parsed.transliteration}</span>}
     </div>
   )
 }

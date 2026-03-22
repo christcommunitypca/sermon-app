@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { getSessionWithOutline, ensureOutline } from '@/lib/teaching'
+import { getSessionWithOutline, ensureOutline, getFlowForSession } from '@/lib/teaching'
 import { SessionDetailActions } from '@/components/teaching/SessionDetailActions'
 import { TeachingWorkspace } from '@/components/teaching/TeachingWorkspace'
 import { PageStepIndicator } from '@/components/teaching/PageStepIndicator'
@@ -10,6 +10,7 @@ import { SessionHeader } from '@/components/teaching/SessionHeader'
 import { TeachingNavToggleButton } from '@/components/teaching/TeachingNavToggleButton'
 import { SessionStatus } from '@/types/database'
 import { hasValidKey } from '@/lib/ai/key'
+import { ensureSharedStudyInsightsFromResearch } from '@/lib/study-content'
 import { getActiveProviderName } from '@/lib/ai/providers/resolver'
 import {
   ChevronLeft,
@@ -47,14 +48,11 @@ export default async function SessionDetailPage({ params }: Props) {
 
   const hasValidAIKey = await hasValidKey(user.id, getActiveProviderName())
 
-  const { data: flows } = await supabaseAdmin
-    .from('flows')
-    .select('*')
-    .eq('church_id', church.id)
-    .eq('teacher_id', user.id)
-    .eq('is_archived', false)
-
-  const matchingFlow = flows?.find(f => f.is_default_for === session.type)
+  const selectedFlow = await getFlowForSession({
+    churchId: church.id,
+    teacherId: user.id,
+    session,
+  })
   const nextStatus = STATUS_NEXT[session.status as SessionStatus]
   const isArchived = session.status === 'archived'
 
@@ -95,6 +93,12 @@ export default async function SessionDetailPage({ params }: Props) {
   let initialVerseNotes: Record<string, import('@/types/database').VerseNote[]> = {}
 
   if (session.scripture_ref) {
+    await ensureSharedStudyInsightsFromResearch({
+      sessionId,
+      churchId: church.id,
+      teacherId: user.id,
+    })
+
     const [{ data: insightRows }, { data: noteRows }] = await Promise.all([
       supabaseAdmin
         .from('verse_insights')
@@ -130,6 +134,24 @@ export default async function SessionDetailPage({ params }: Props) {
   const stepHasResearch = Object.keys(initialInsights).length > 0
   const stepHasBlocks   = blocks.length > 0
   const stepIsPublished = session.status === 'published' || session.status === 'delivered'
+
+  const workspaceSelectedFlow = selectedFlow
+  ? {
+      id: selectedFlow.id,
+      name: selectedFlow.name,
+      description: selectedFlow.description ?? null,
+      explanation: selectedFlow.explanation ?? null,
+      steps: (selectedFlow.steps ?? []).map(step => ({
+        id: step.id,
+        title: step.title,
+        promptHint: step.prompt_hint ?? null,
+        suggestedBlockType: step.suggested_block_type ?? null,
+      })),
+    }
+  : null
+
+const scheduledDate =
+  'scheduled_date' in session ? session.scheduled_date ?? null : null
 
   return (
     <div className="px-4 py-3 md:-ml-56 md:px-8">
@@ -205,27 +227,27 @@ export default async function SessionDetailPage({ params }: Props) {
 
       {/* Teaching workspace */}
       <div className={isArchived ? 'opacity-70 pointer-events-none' : ''}>
-        <TeachingWorkspace
-          sessionId={sessionId}
-          churchId={church.id}
-          churchSlug={churchSlug}
-          outlineId={outline.id}
-          initialBlocks={blocks}
-          flowStructure={matchingFlow?.structure}
-          hasValidAIKey={hasValidAIKey}
-          scriptureRef={session.scripture_ref ?? null}
-          initialStudyMode={initialStudyMode}
-          estimatedDuration={session.estimated_duration ?? null}
-          initialVerses={initialVerses}
-          initialInsights={initialInsights}
-          initialVerseNotes={initialVerseNotes}
-          isPublished={session.status === 'published' || session.status === 'delivered'}
-          sessionTitle={session.title}
-          scheduledDate={(session as any).scheduled_date ?? null}
-          initialPericSections={initialPericSections}
-          initialHasSectionHeaders={initialHasSectionHeaders}
-          initialPericopeSetupComplete={initialPericopeSetupComplete}
-        />
+<TeachingWorkspace
+  sessionId={sessionId}
+  churchId={church.id}
+  churchSlug={churchSlug}
+  outlineId={outline.id}
+  initialBlocks={blocks}
+  selectedFlow={workspaceSelectedFlow}
+  hasValidAIKey={hasValidAIKey}
+  scriptureRef={session.scripture_ref ?? null}
+  initialStudyMode={initialStudyMode}
+  estimatedDuration={session.estimated_duration ?? null}
+  initialVerses={initialVerses}
+  initialInsights={initialInsights}
+  initialVerseNotes={initialVerseNotes}
+  isPublished={session.status === 'published' || session.status === 'delivered'}
+  sessionTitle={session.title}
+  scheduledDate={scheduledDate}
+  initialPericSections={initialPericSections}
+  initialHasSectionHeaders={initialHasSectionHeaders}
+  initialPericopeSetupComplete={initialPericopeSetupComplete}
+/>
       </div>
     </div>
   )

@@ -17,6 +17,15 @@ const TYPE_LABELS: Record<SessionType, string> = {
   bible_study: 'Bible Study',
 }
 
+function flowBadges(flow: Flow) {
+  const badges: Array<{ label: string; tone: 'violet' | 'sky' }> = []
+  if (flow.is_default_for) badges.push({ label: `Default for ${TYPE_LABELS[flow.is_default_for]}`, tone: 'violet' })
+  for (const type of flow.recommended_for ?? []) {
+    badges.push({ label: `Recommended for ${TYPE_LABELS[type]}`, tone: 'sky' })
+  }
+  return badges
+}
+
 export default async function FlowsPage({ params, searchParams }: Props) {
   const { churchSlug } = params
   const showArchived = searchParams.show === 'archived'
@@ -45,11 +54,11 @@ export default async function FlowsPage({ params, searchParams }: Props) {
     .eq('is_archived', true)
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Flows</h1>
-          <p className="text-sm text-slate-500 mt-1">Reusable sermon and lesson structures</p>
+          <p className="text-sm text-slate-500 mt-1">Reusable sermon and lesson movements</p>
         </div>
         {!showArchived && (
           <Link href={`/${churchSlug}/flows/new`} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
@@ -58,7 +67,6 @@ export default async function FlowsPage({ params, searchParams }: Props) {
         )}
       </div>
 
-      {/* Archive toggle */}
       <div className="flex items-center gap-2 mb-6">
         <Link href={`/${churchSlug}/flows`}
           className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${!showArchived ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}>
@@ -87,7 +95,7 @@ export default async function FlowsPage({ params, searchParams }: Props) {
           <p className="text-sm text-slate-400 mb-6 max-w-sm">
             {showArchived
               ? 'Archived flows appear here. Archive a flow from its detail page or the actions menu.'
-              : 'Flows define a reusable block structure for your sermons. Create one and apply it when starting new sessions.'}
+              : 'Flows define a reusable sermon movement for your sermons and lessons. Create one and apply it when starting new sessions.'}
           </p>
           {!showArchived && (
             <Link href={`/${churchSlug}/flows/new`} className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
@@ -96,39 +104,57 @@ export default async function FlowsPage({ params, searchParams }: Props) {
           )}
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {flows.map((flow: Flow) => (
-            <div key={flow.id} className="relative group">
-              <Link href={`/${churchSlug}/flows/${flow.id}`}
-                className={`block bg-white border rounded-xl p-5 hover:border-slate-300 hover:shadow-sm transition-all ${showArchived ? 'border-stone-200 opacity-75' : 'border-slate-100'}`}>
-                <div className="flex items-start justify-between mb-2 pr-6">
-                  <h3 className="font-semibold text-slate-900">{flow.name}</h3>
-                  {flow.is_default_for && !showArchived && (
-                    <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">
-                      Default for {TYPE_LABELS[flow.is_default_for as SessionType]}
-                    </span>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {flows.map((flow: Flow) => {
+            const badges = flowBadges(flow)
+            return (
+              <div key={flow.id} className="relative group">
+                <Link href={`/${churchSlug}/flows/${flow.id}`}
+                  className={`block bg-white border rounded-2xl p-5 hover:border-slate-300 hover:shadow-sm transition-all ${showArchived ? 'border-stone-200 opacity-75' : 'border-slate-200'}`}>
+                  <div className="pr-8">
+                    <h3 className="font-semibold text-slate-900 text-lg">{flow.name}</h3>
+                    {flow.description && <p className="text-sm text-slate-500 mt-1">{flow.description}</p>}
+                  </div>
+
+                  {badges.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {badges.map((badge, idx) => (
+                        <span
+                          key={idx}
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.tone === 'violet' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}
+                        >
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                </div>
-                {flow.description && <p className="text-sm text-slate-500 mb-3">{flow.description}</p>}
-                <div className="flex flex-wrap gap-1.5">
-                  {flow.structure.slice(0, 6).map((block: any, i: number) => (
-                    <span key={i} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">{block.label}</span>
-                  ))}
-                  {flow.structure.length > 6 && (
-                    <span className="text-xs text-slate-400">+{flow.structure.length - 6} more</span>
+
+                  {flow.explanation && (
+                    <p className="text-sm text-slate-600 mt-4 line-clamp-2">{flow.explanation}</p>
                   )}
+
+                  <div className="flex flex-wrap gap-1.5 mt-4">
+                    {flow.steps.slice(0, 6).map((step, i) => (
+                      <span key={step.id ?? i} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
+                        {step.title}
+                      </span>
+                    ))}
+                    {flow.steps.length > 6 && (
+                      <span className="text-xs text-slate-400">+{flow.steps.length - 6} more</span>
+                    )}
+                  </div>
+                </Link>
+                <div className="absolute top-3 right-3">
+                  <FlowRowActions
+                    flowId={flow.id}
+                    churchId={church.id}
+                    churchSlug={churchSlug}
+                    isArchived={showArchived}
+                  />
                 </div>
-              </Link>
-              <div className="absolute top-3 right-3">
-                <FlowRowActions
-                  flowId={flow.id}
-                  churchId={church.id}
-                  churchSlug={churchSlug}
-                  isArchived={showArchived}
-                />
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

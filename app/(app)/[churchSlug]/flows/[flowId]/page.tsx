@@ -29,8 +29,10 @@ export default async function FlowDetailPage({ params }: Props) {
         churchSlug={churchSlug}
         initialName={flow.name}
         initialDescription={flow.description}
-        initialStructure={flow.structure ?? []}
+        initialExplanation={flow.explanation ?? null}
+        initialSteps={flow.steps ?? []}
         initialDefaultFor={flow.is_default_for}
+        initialRecommendedFor={flow.recommended_for ?? []}
       />
     </div>
   )

@@ -5,6 +5,7 @@ import { Pin, PinOff, X, ArrowUpRight, Check } from 'lucide-react'
 import { ResearchItem as ResearchItemType, BlockType } from '@/types/database'
 import { SourceBadge } from './SourceBadge'
 import { pinResearchItemAction, dismissResearchItemAction, pushResearchToOutlineAction } from '@/app/(app)/[churchSlug]/teaching/[sessionId]/research-actions'
+import { getPreferredWordStudyPushLabel, parseWordStudyTitle } from '@/lib/word-study'
 
 function inferBlockType(item: ResearchItemType): BlockType {
   const meta = item.metadata as Record<string, unknown>
@@ -18,22 +19,41 @@ function inferBlockType(item: ResearchItemType): BlockType {
   }
 }
 
+
 // Determine what content to push to the outline for each category
 function getPushContent(item: ResearchItemType): string {
   if (item.category === 'related_text') {
     // Push the scripture reference, not the explanation
     const meta = item.metadata as Record<string, unknown>
+   
     return (meta?.ref as string) || item.title || item.content
   }
   if (item.category === 'word_study') {
-    // Push the English word title as a point — concise, outline-appropriate
-    return item.title
+    return getPreferredWordStudyPushLabel(item.title, (item.metadata as Record<string, unknown> | undefined)?.word as string | undefined)
   }
   if (item.category === 'theological') {
     // Push the title (e.g. "Reformed: unconditional election") as the point label
     return item.title
   }
   return item.content
+}
+
+function WordStudyHeading({ title, metadataWord }: { title: string; metadataWord?: string }) {
+  const parsed = parseWordStudyTitle(title, metadataWord)
+  if (!parsed.original) {
+    return <h4 className="text-sm font-semibold text-slate-900 leading-snug flex-1">{parsed.fallbackTitle}</h4>
+  }
+
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        {parsed.english && <span className="text-sm font-semibold text-slate-900">{parsed.english}</span>}
+        {parsed.english && <span className="text-xs text-slate-400">|</span>}
+        <span className="text-base font-semibold text-slate-900 font-serif italic">{parsed.original}</span>
+        {parsed.transliteration && <span className="text-xs text-slate-500">{parsed.transliteration}</span>}
+      </div>
+    </div>
+  )
 }
 
 interface Props {
@@ -46,12 +66,18 @@ interface Props {
 }
 
 export function ResearchItem({ item, sessionId, churchId, churchSlug, onDismiss, onPinToggle }: Props) {
+  const meta = item.metadata as Record<string, unknown>
+  
+  const rowVerseRef = (meta?.rowVerseRef as string | undefined) ?? 'session:research'
+  const rowItemIndex = typeof meta?.rowItemIndex === 'number' ? meta.rowItemIndex : 0
+  const sourceResearchId = (meta?.sourceResearchId as string | undefined) ?? item.id
+
   const [pushing, setPushing] = useState(false)
   const [pushed, setPushed] = useState(false)
   const [pinning, setPinning] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  const meta = item.metadata as Record<string, unknown>
+  
   const isWordStudy = item.category === 'word_study'
   const isRelatedText = item.category === 'related_text'
   const isTheological = item.category === 'theological'
@@ -70,12 +96,22 @@ export function ResearchItem({ item, sessionId, churchId, churchSlug, onDismiss,
   const metaTestament = meta?.testament as string | undefined
   const metaConnectionType = meta?.connection_type as string | undefined
   const isLong = item.content.length > 280
-
+  
   async function handlePush() {
     setPushing(true)
     const blockType = inferBlockType(item)
     const content = getPushContent(item)
-    const result = await pushResearchToOutlineAction(sessionId, churchId, churchSlug, content, blockType)
+    const result = await pushResearchToOutlineAction({
+      sessionId,
+      churchId,
+      churchSlug,
+      content,
+      blockType,
+      verseRef: rowVerseRef,
+      category: item.category,
+      itemIndex: rowItemIndex,
+      sourceResearchId,
+    })
     setPushing(false)
     if (!result.error) {
       setPushed(true)
@@ -86,13 +122,26 @@ export function ResearchItem({ item, sessionId, churchId, churchSlug, onDismiss,
   async function handlePin() {
     setPinning(true)
     const newPinned = !item.is_pinned
-    await pinResearchItemAction(item.id, newPinned)
+    await pinResearchItemAction({
+      sessionId,
+      verseRef: rowVerseRef,
+      category: item.category,
+      itemIndex: rowItemIndex,
+      isPinned: newPinned,
+      sourceResearchId,
+    })
     onPinToggle(item.id, newPinned)
     setPinning(false)
   }
 
   async function handleDismiss() {
-    await dismissResearchItemAction(item.id)
+    await dismissResearchItemAction({
+      sessionId,
+      verseRef: rowVerseRef,
+      category: item.category,
+      itemIndex: rowItemIndex,
+      sourceResearchId,
+    })
     onDismiss(item.id)
   }
 
@@ -105,29 +154,21 @@ export function ResearchItem({ item, sessionId, churchId, churchSlug, onDismiss,
         : 'border-slate-100 hover:border-slate-200'
     }`}>
 
-      {/* Word study: original word header strip */}
-      {isWordStudy && metaWord && (
+      {isWordStudy && (metaLanguage || metaStrongs || metaSemanticRange.length > 0) && (
         <div className="px-4 pt-3 pb-2 border-b border-slate-100">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className="text-base font-semibold text-slate-800 font-serif italic">
-              {metaWord}
-            </span>
+          <div className="flex items-center gap-2 flex-wrap">
             {metaLanguage && (
               <span className="text-xs text-slate-400 capitalize">{metaLanguage}</span>
             )}
             {metaStrongs && (
               <span className="text-xs font-mono text-slate-400">{metaStrongs}</span>
             )}
+            {metaSemanticRange.slice(0, 4).map((facet, i) => (
+              <span key={i} className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                {facet}
+              </span>
+            ))}
           </div>
-          {metaSemanticRange.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {metaSemanticRange.slice(0, 4).map((facet, i) => (
-                <span key={i} className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                  {facet}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -155,7 +196,7 @@ export function ResearchItem({ item, sessionId, churchId, churchSlug, onDismiss,
           </div>
         )}
         <div className="flex items-start justify-between gap-3 mb-2">
-          <h4 className="text-sm font-semibold text-slate-900 leading-snug flex-1">{item.title}</h4>
+          {isWordStudy ? <WordStudyHeading title={item.title} metadataWord={metaWord} /> : <h4 className="text-sm font-semibold text-slate-900 leading-snug flex-1">{item.title}</h4>}
           {/* Actions: always visible on mobile, hover-reveal on desktop */}
           <div className="flex items-center gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
             <button

@@ -3,6 +3,7 @@
 // App code should import result/input types from here (via service.ts re-exports).
 
 import type { OutlineBlock, ResearchCategory, ProposedWeek, Json } from '@/types/database'
+import type { OutlineSelectedFlow } from '@/lib/outlinePrompt'
 
 // ── Provider identity ──────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ export interface OutlineInput {
     estimatedDuration?: number | null
   }
   thoughts: { content: string }[]
-  flowStructure?: { type: string; label: string }[]
+  selectedFlow?: OutlineSelectedFlow | null
   outlineId: string
   // Optional verse-study context (from Verse by Verse mode)
   verseNotes?: Record<string, string>

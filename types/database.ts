@@ -102,10 +102,19 @@ export interface TeachingSession {
   estimated_duration: number | null
   notes: string | null
   scheduled_date: string | null
+  selected_flow_id: string | null
+  selected_flow_snapshot: SelectedFlowSnapshot | null
   published_at: string | null
   delivered_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface FlowStep {
+  id: string
+  title: string
+  prompt_hint?: string | null
+  suggested_block_type?: BlockType | null
 }
 
 export interface Flow {
@@ -114,7 +123,9 @@ export interface Flow {
   teacher_id: string
   name: string
   description: string | null
-  structure: FlowBlock[]
+  explanation: string | null
+  steps: FlowStep[]
+  recommended_for: SessionType[]
   is_default_for: SessionType | null
   is_archived: boolean
   archived_at: string | null
@@ -122,10 +133,16 @@ export interface Flow {
   updated_at: string
 }
 
-export interface FlowBlock {
-  type: BlockType
-  label: string
-  placeholder?: string
+/**
+ * Frozen copy of the selected flow at the moment it is attached to a session.
+ * This prevents later flow edits from silently changing older sessions.
+ */
+export interface SelectedFlowSnapshot {
+  id: string
+  name: string
+  description: string | null
+  explanation: string | null
+  steps: FlowStep[]
 }
 
 export interface Outline {

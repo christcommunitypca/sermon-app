@@ -1,56 +1,83 @@
 'use server'
 
 import { getActionUser } from '@/lib/supabase/auth-context'
-
-import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { BlockType } from '@/types/database'
+import {
+  dismissUnifiedStudyItem,
+  incrementUnifiedStudyItemUsedCount,
+  setUnifiedStudyItemPinned,
+} from '@/lib/study-content'
 
-export async function pinResearchItemAction(
-  itemId: string,
+export async function pinResearchItemAction(args: {
+  sessionId: string
+  verseRef: string
+  category: string
+  itemIndex: number
   isPinned: boolean
-): Promise<{ error?: string }> {
+  sourceResearchId?: string | null
+}): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  const { error } = await supabaseAdmin
-    .from('research_items')
-    .update({ is_pinned: isPinned })
-    .eq('id', itemId)
-    .eq('teacher_id', user.id)
-
-  if (error) return { error: error.message }
-  return {}
+  try {
+    await setUnifiedStudyItemPinned({
+      sessionId: args.sessionId,
+      teacherId: user.id,
+      verseRef: args.verseRef,
+      category: args.category,
+      itemIndex: args.itemIndex,
+      isPinned: args.isPinned,
+      sourceResearchId: args.sourceResearchId,
+    })
+    return {}
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unable to update item.' }
+  }
 }
 
-export async function dismissResearchItemAction(
-  itemId: string
-): Promise<{ error?: string }> {
+export async function dismissResearchItemAction(args: {
+  sessionId: string
+  verseRef: string
+  category: string
+  itemIndex: number
+  sourceResearchId?: string | null
+}): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  const { error } = await supabaseAdmin
-    .from('research_items')
-    .update({ is_dismissed: true })
-    .eq('id', itemId)
-    .eq('teacher_id', user.id)
-
-  if (error) return { error: error.message }
-  return {}
+  try {
+    await dismissUnifiedStudyItem({
+      sessionId: args.sessionId,
+      teacherId: user.id,
+      verseRef: args.verseRef,
+      category: args.category,
+      itemIndex: args.itemIndex,
+      sourceResearchId: args.sourceResearchId,
+    })
+    return {}
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unable to dismiss item.' }
+  }
 }
 
 // Append a research item as a block to the session's outline
-export async function pushResearchToOutlineAction(
-  sessionId: string,
-  churchId: string,
-  churchSlug: string,
-  content: string,
+export async function pushResearchToOutlineAction(args: {
+  sessionId: string
+  churchId: string
+  churchSlug: string
+  content: string
   blockType: BlockType
-): Promise<{ error?: string }> {
+  verseRef?: string
+  category?: string
+  itemIndex?: number
+  sourceResearchId?: string | null
+}): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  // Verify session ownership
+  const { sessionId, churchId, content, blockType } = args
+
   const { data: session } = await supabaseAdmin
     .from('teaching_sessions')
     .select('teacher_id')
@@ -59,7 +86,6 @@ export async function pushResearchToOutlineAction(
 
   if (session?.teacher_id !== user.id) return { error: 'Unauthorized' }
 
-  // Get or create outline
   let { data: outline } = await supabaseAdmin
     .from('outlines')
     .select('id')
@@ -77,7 +103,6 @@ export async function pushResearchToOutlineAction(
 
   if (!outline) return { error: 'Could not find or create outline' }
 
-  // Get max position at top level
   const { data: existing } = await supabaseAdmin
     .from('outline_blocks')
     .select('position')
@@ -101,10 +126,23 @@ export async function pushResearchToOutlineAction(
     })
 
   if (error) return { error: error.message }
+
+  if (args.verseRef && args.category && typeof args.itemIndex === 'number') {
+    try {
+      await incrementUnifiedStudyItemUsedCount({
+        sessionId: args.sessionId,
+        teacherId: user.id,
+        verseRef: args.verseRef,
+        category: args.category,
+        itemIndex: args.itemIndex,
+        sourceResearchId: args.sourceResearchId,
+      })
+    } catch {}
+  }
+
   return {}
 }
 
-// Update tradition setting
 export async function updateTraditionAction(
   userId: string,
   tradition: string

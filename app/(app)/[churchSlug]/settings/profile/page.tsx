@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { ProfileForm } from '@/components/settings/ProfileForm'
 import Link from 'next/link'
 import { ChevronRight, Church } from 'lucide-react'
+import { Role } from '@/types/database'
 
 interface Props { params: { churchSlug: string } }
 
@@ -13,6 +14,14 @@ export default async function ProfilePage({ params }: Props) {
   const { data: { session: authSession } } = await supabase.auth.getSession()
   if (!authSession) redirect('/sign-in')
   const user = authSession.user
+
+  const { data: member } = await supabaseAdmin
+    .from('church_members')
+    .select('role')
+    .eq('church_id', (await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()).data?.id)
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .single()
 
   const { data: profile } = await supabaseAdmin
     .from('profiles')
@@ -26,21 +35,6 @@ export default async function ProfilePage({ params }: Props) {
         <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
       </div>
 
-      {/* Settings nav */}
-      <div className="flex gap-2 mb-8 overflow-x-auto pb-1">
-        {[
-          { href: `/${churchSlug}/settings/profile`, label: 'Profile' },
-          { href: `/${churchSlug}/settings/ai`, label: 'AI Key' },
-          { href: `/${churchSlug}/settings/tradition`, label: 'Tradition' },
-          { href: `/${churchSlug}/settings/notifications`, label: 'Notifications' },
-          { href: `/${churchSlug}/settings/calendar`, label: 'Calendar' },
-        ].map(({ href, label }) => (
-          <Link key={href} href={href}
-            className="shrink-0 px-3 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors">
-            {label}
-          </Link>
-        ))}
-      </div>
 
       <div className="mb-6">
         <h2 className="text-base font-semibold text-slate-900 mb-1">Profile</h2>

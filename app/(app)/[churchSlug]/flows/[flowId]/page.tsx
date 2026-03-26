@@ -1,9 +1,8 @@
 import { notFound, redirect } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { FlowEditor } from '@/components/flows/FlowEditor'
-import { ChevronLeft } from 'lucide-react'
+import { FlowLibraryShell } from '@/components/flows/FlowLibraryShell'
 
 interface Props { params: { churchSlug: string; flowId: string } }
 
@@ -14,16 +13,18 @@ export default async function FlowDetailPage({ params }: Props) {
   if (!session) redirect('/sign-in')
   const user = session.user
 
-  const { data: flow } = await supabaseAdmin
-    .from('flows').select('*').eq('id', flowId).eq('teacher_id', user.id).single()
+  const { data: flows } = await supabaseAdmin
+    .from('flows')
+    .select('*')
+    .eq('teacher_id', user.id)
+    .eq('is_archived', false)
+    .order('name')
+
+  const flow = (flows ?? []).find(f => f.id === flowId)
   if (!flow) return notFound()
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      <Link href={`/${churchSlug}/flows`} className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 mb-6 transition-colors">
-        <ChevronLeft className="w-4 h-4" />Flows
-      </Link>
-      <h1 className="text-2xl font-bold text-slate-900 mb-8">{flow.name}</h1>
+    <FlowLibraryShell churchSlug={churchSlug} flows={flows ?? []} selectedFlowId={flowId} createHref={`/${churchSlug}/flows/new`}>
       <FlowEditor
         flowId={flow.id}
         churchSlug={churchSlug}
@@ -32,8 +33,7 @@ export default async function FlowDetailPage({ params }: Props) {
         initialExplanation={flow.explanation ?? null}
         initialSteps={flow.steps ?? []}
         initialDefaultFor={flow.is_default_for}
-        initialRecommendedFor={flow.recommended_for ?? []}
       />
-    </div>
+    </FlowLibraryShell>
   )
 }

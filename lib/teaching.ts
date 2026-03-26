@@ -141,8 +141,8 @@ export async function getFlowForSession(args: {
       .select('*')
       .eq('id', session.selected_flow_id)
       .eq('church_id', churchId)
-      .eq('teacher_id', teacherId)
       .eq('is_archived', false)
+      .or(`owner_user_id.is.null,owner_user_id.eq.${teacherId}`)
       .single()
 
     if (selectedFlow) {
@@ -155,11 +155,11 @@ export async function getFlowForSession(args: {
     .from('flows')
     .select('*')
     .eq('church_id', churchId)
-    .eq('teacher_id', teacherId)
     .eq('is_archived', false)
-    .eq('is_default_for', session.type)
-    .limit(1)
+    .or(`owner_user_id.is.null,owner_user_id.eq.${teacherId}`)
 
-  const fallback = flows?.[0] as Flow | undefined
+  const personalDefault = (flows ?? []).find((flow: any) => flow.owner_user_id === teacherId && flow.is_default_for === session.type) as Flow | undefined
+  const churchDefault = (flows ?? []).find((flow: any) => flow.owner_user_id == null && flow.is_default_for === session.type) as Flow | undefined
+  const fallback = personalDefault ?? churchDefault
   return fallback ? buildSelectedFlowSnapshot(fallback) : null
 }

@@ -12,16 +12,6 @@ interface Props {
 
 export default async function AppLayout({ children, params }: Props) {
   const { churchSlug } = params
-
-  // ── 1. Require authenticated user ─────────────────────────────────────────
-  // getSession() reads the cookie directly — no network call, no token rotation.
-  // This is safe because:
-  //   a) The sign-in server action wrote the cookie server-side (httpOnly).
-  //   b) Pages only use session.user.id to scope their own DB queries.
-  //   c) All writes go through route handlers which validate via Bearer token.
-  // We intentionally do NOT call getUser() here — that triggers token rotation
-  // which invalidates the cookie before the browser receives the new one,
-  // causing the next navigation to lose the session.
   const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) {
@@ -29,7 +19,6 @@ export default async function AppLayout({ children, params }: Props) {
   }
   const user = session.user
 
-  // ── 2. Resolve church by slug ──────────────────────────────────────────────
   const { data: church } = await supabaseAdmin
     .from('churches')
     .select('id, name, slug')
@@ -38,7 +27,6 @@ export default async function AppLayout({ children, params }: Props) {
 
   if (!church) notFound()
 
-  // ── 3. Verify active membership ────────────────────────────────────────────
   const { data: member } = await supabaseAdmin
     .from('church_members')
     .select('id, role, is_active')
@@ -51,27 +39,48 @@ export default async function AppLayout({ children, params }: Props) {
     redirect('/sign-in?error=not_a_member')
   }
 
-  // ── 4. Fetch profile for nav display ──────────────────────────────────────
   const { data: profile } = await supabaseAdmin
     .from('profiles')
     .select('full_name, avatar_url')
     .eq('id', user.id)
     .single()
 
-  // ── 5. Get unread notification count for bell badge ───────────────────────
   const { count: unreadCount } = await supabaseAdmin
     .from('notifications')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
     .is('read_at', null)
 
-  // ── 6. Build context ───────────────────────────────────────────────────────
+  const { data: globalAdmin } = await supabaseAdmin
+    .from('global_admins')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const { data: memberships } = await supabaseAdmin
+    .from('church_members')
+    .select('role, churches(name, slug)')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+
+  const isSystemAdmin = !!globalAdmin
+
+  const churchOptions = (memberships ?? []).map((row: any) => {
+    const info = Array.isArray(row.churches) ? row.churches[0] : row.churches
+    return {
+      name: info?.name ?? 'Church',
+      slug: info?.slug ?? '',
+      role: row.role as 'owner' | 'admin' | 'teacher',
+    }
+  }).filter((row: any) => !!row.slug)
+
   const churchContext: ChurchContextClient = {
     churchId: church.id,
     churchSlug: church.slug,
     churchName: church.name,
     userId: user.id,
     userRole: member.role as 'owner' | 'admin' | 'teacher',
+    isSystemAdmin,
     userName: profile?.full_name ?? null,
     avatarUrl: profile?.avatar_url ?? null,
   }
@@ -83,9 +92,11 @@ export default async function AppLayout({ children, params }: Props) {
           churchSlug={church.slug}
           churchName={church.name}
           userRole={member.role as 'owner' | 'admin' | 'teacher'}
+          isSystemAdmin={isSystemAdmin}
           userName={profile?.full_name ?? null}
           avatarUrl={profile?.avatar_url ?? null}
           unreadCount={unreadCount ?? 0}
+          churchOptions={churchOptions}
         />
         <main className="flex-1 md:ml-56">
           {children}

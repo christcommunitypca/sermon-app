@@ -18,11 +18,12 @@ interface Props {
   editHref:          string
   tagsHref:          string
   historyHref:       string
+  flowName?:         string | null
 }
 
 export function SessionHeader({
   title, type, scriptureRef, scheduledDate, estimatedDuration,
-  status, notes, visibility, createdAt, isArchived, editHref, tagsHref, historyHref,
+  status, notes, visibility, createdAt, isArchived, editHref, tagsHref, historyHref, flowName,
 }: Props) {
   const [expanded, setExpanded] = useState(false)
 
@@ -41,7 +42,6 @@ export function SessionHeader({
 
   return (
     <div className={`bg-white border rounded-2xl mb-4 ${isArchived ? 'border-stone-200 opacity-80' : 'border-slate-200'}`}>
-      {/* ── Always-visible compact row ─────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-4 py-3">
         <button
           onClick={() => setExpanded(e => !e)}
@@ -64,7 +64,6 @@ export function SessionHeader({
           </span>
         </div>
 
-        {/* Secondary actions — tags and history */}
         <div className="flex items-center gap-0.5 shrink-0 ml-1">
           <Link href={tagsHref}
             className="p-1.5 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -86,14 +85,17 @@ export function SessionHeader({
         </div>
       </div>
 
-      {/* ── Expanded detail — notes + date + created ──────────────────────── */}
       {expanded && (
-        <div className="px-4 pb-4 pt-3 border-t border-slate-100 space-y-2">
-          {/* Session notes if any */}
+        <div className="px-4 pb-4 pt-3 border-t border-slate-100 space-y-3">
+          {flowName && (
+            <div className="text-sm text-slate-600">
+              <span className="font-medium text-slate-700">Flow:</span> {flowName}
+            </div>
+          )}
           {notes && <p className="text-sm text-slate-600 leading-relaxed">{notes}</p>}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-            {/* Date only shown here if hidden at md breakpoint */}
             {dateStr && <span className="md:hidden">{dateStr}</span>}
+            {typeof estimatedDuration === 'number' && <span>{estimatedDuration} min target</span>}
             <span>Created {new Date(createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
           </div>
         </div>

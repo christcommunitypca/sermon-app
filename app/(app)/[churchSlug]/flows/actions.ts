@@ -6,34 +6,18 @@ import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { FlowStep, SessionType } from '@/types/database'
 
-function parseSteps(raw: FormDataEntryValue | null): FlowStep[] {
-  if (typeof raw !== 'string' || !raw.trim()) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function parseRecommendedFor(raw: FormDataEntryValue | null): SessionType[] {
-  if (typeof raw !== 'string' || !raw.trim()) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter(Boolean) as SessionType[] : []
-  } catch {
-    return []
-  }
-}
-
 export async function createFlowAction(formData: FormData) {
   const user = await getActionUser()
   if (!user) return redirect('/sign-in')
 
   const churchId = formData.get('churchId') as string
   const churchSlug = formData.get('churchSlug') as string
-  const steps = parseSteps(formData.get('steps'))
-  const recommendedFor = parseRecommendedFor(formData.get('recommended_for'))
+  const stepsRaw = formData.get('steps') as string
+
+  let steps: FlowStep[] = []
+  try {
+    steps = JSON.parse(stepsRaw)
+  } catch {}
 
   const { data, error } = await supabaseAdmin
     .from('flows')
@@ -44,7 +28,7 @@ export async function createFlowAction(formData: FormData) {
       description: (formData.get('description') as string)?.trim() || null,
       explanation: (formData.get('explanation') as string)?.trim() || null,
       steps,
-      recommended_for: recommendedFor,
+      recommended_for: [],
       is_default_for: (formData.get('is_default_for') as SessionType) || null,
     })
     .select()
@@ -52,6 +36,7 @@ export async function createFlowAction(formData: FormData) {
 
   if (error) throw new Error(error.message)
 
+  revalidatePath(`/${churchSlug}/flows`)
   redirect(`/${churchSlug}/flows/${data.id}`)
 }
 
@@ -70,17 +55,9 @@ export async function updateFlowAction(
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  const payload = {
-    ...updates,
-    name: updates.name?.trim(),
-    description: updates.description?.trim() || null,
-    explanation: updates.explanation?.trim() || null,
-    updated_at: new Date().toISOString(),
-  }
-
   const { error } = await supabaseAdmin
     .from('flows')
-    .update(payload)
+    .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', flowId)
     .eq('teacher_id', user.id)
 
@@ -91,10 +68,7 @@ export async function updateFlowAction(
   return {}
 }
 
-export async function archiveFlowAction(
-  flowId: string,
-  churchSlug: string
-): Promise<{ error?: string }> {
+export async function archiveFlowAction(flowId: string, churchSlug: string): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
@@ -105,14 +79,12 @@ export async function archiveFlowAction(
     .eq('teacher_id', user.id)
 
   if (error) return { error: error.message }
+
   revalidatePath(`/${churchSlug}/flows`)
-  return {}
+  redirect(`/${churchSlug}/flows`)
 }
 
-export async function unarchiveFlowAction(
-  flowId: string,
-  churchSlug: string
-): Promise<{ error?: string }> {
+export async function unarchiveFlowAction(flowId: string, churchSlug: string): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
@@ -127,24 +99,17 @@ export async function unarchiveFlowAction(
   return {}
 }
 
-export async function deleteFlowAction(flowId: string, churchId: string, churchSlug: string) {
+export async function deleteFlowAction(flowId: string, churchSlug: string): Promise<{ error?: string }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' }
 
-  const { data: flow } = await supabaseAdmin
-    .from('flows')
-    .select('is_archived, teacher_id')
-    .eq('id', flowId)
-    .single()
-
-  if (!flow || flow.teacher_id !== user.id) return
-  if (!flow.is_archived) return
-
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('flows')
     .delete()
     .eq('id', flowId)
     .eq('teacher_id', user.id)
 
-  redirect(`/${churchSlug}/flows`)
+  if (error) return { error: error.message }
+  revalidatePath(`/${churchSlug}/flows`)
+  return {}
 }

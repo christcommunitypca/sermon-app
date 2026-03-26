@@ -10,13 +10,12 @@ import { SessionHeader } from '@/components/teaching/SessionHeader'
 import { TeachingNavToggleButton } from '@/components/teaching/TeachingNavToggleButton'
 import { SessionStatus } from '@/types/database'
 import { hasValidKey } from '@/lib/ai/key'
-import { ensureSharedStudyInsightsFromResearch } from '@/lib/study-content'
 import { getActiveProviderName } from '@/lib/ai/providers/resolver'
 import {
   ChevronLeft,
   Presentation
 } from 'lucide-react'
-import { updateSessionStatusAction } from '../actions'
+import { updateSessionStatusAction, unarchiveSessionAction } from '../actions'
 import { fetchPassageWithHeaders } from '@/lib/esv'
 import type { TeachingMode } from '@/components/teaching/TeachingWorkspace'
 
@@ -93,12 +92,6 @@ export default async function SessionDetailPage({ params }: Props) {
   let initialVerseNotes: Record<string, import('@/types/database').VerseNote[]> = {}
 
   if (session.scripture_ref) {
-    await ensureSharedStudyInsightsFromResearch({
-      sessionId,
-      churchId: church.id,
-      teacherId: user.id,
-    })
-
     const [{ data: insightRows }, { data: noteRows }] = await Promise.all([
       supabaseAdmin
         .from('verse_insights')
@@ -200,9 +193,21 @@ const scheduledDate =
       </div>
 
       {isArchived && (
-        <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-600">
-          <span>This session is archived.</span>
-          <span className="text-stone-400">It won't appear in your active session list.</span>
+        <div className="mb-6 flex items-center justify-between gap-3 px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-600">
+          <div className="flex items-center gap-3">
+            <span>This session is archived.</span>
+            <span className="text-stone-400">It won't appear in your active session list.</span>
+          </div>
+          <form
+              action={async () => {
+                'use server'
+                await unarchiveSessionAction(sessionId, churchSlug)
+              }}
+            >
+            <button type="submit" className="px-3 py-1.5 text-xs font-medium text-stone-700 border border-stone-300 rounded-lg hover:bg-white transition-colors">
+              Unarchive
+            </button>
+          </form>
         </div>
       )}
 
@@ -226,7 +231,7 @@ const scheduledDate =
       </div>
 
       {/* Teaching workspace */}
-      <div className={isArchived ? 'opacity-70 pointer-events-none' : ''}>
+      <div>
 <TeachingWorkspace
   sessionId={sessionId}
   churchId={church.id}

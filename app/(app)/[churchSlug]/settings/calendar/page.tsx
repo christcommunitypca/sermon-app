@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { Calendar } from 'lucide-react'
+import { Role } from '@/types/database'
 import { CalendarSettings } from '@/components/settings/CalendarSettings'
 import { computeBuiltInDates, toISODate } from '@/lib/calendar/dates'
 import { SERVICE_TYPES } from '@/lib/calendar/constants'
@@ -35,16 +36,25 @@ export default async function CalendarSettingsPage({ params }: Props) {
   // Which built-in keys already have a custom event record
   const configuredKeys = new Set(events.map(e => e.recurrence_key).filter(Boolean))
 
+  const { data: member } = await supabaseAdmin
+    .from('church_members')
+    .select('role')
+    .eq('church_id', church.id)
+    .eq('user_id', authSession.user.id)
+    .eq('is_active', true)
+    .single()
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center gap-3 mb-1">
         <Calendar className="w-5 h-5 text-slate-500" />
         <h1 className="text-2xl font-bold text-slate-900">Church Calendar</h1>
       </div>
-      <p className="text-sm text-slate-500 mb-8 ml-8">
+      <p className="text-sm text-slate-500 mb-6 ml-8">
         Configure recurring dates and one-time events that affect your teaching schedule.
         Scheduling impact can be set per service type.
       </p>
+
 
       <CalendarSettings
         churchId={church.id}

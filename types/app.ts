@@ -19,6 +19,7 @@ export interface ChurchContextClient {
   churchName: string
   userId: string
   userRole: Role
+  isSystemAdmin?: boolean
   userName: string | null
   avatarUrl: string | null
 }

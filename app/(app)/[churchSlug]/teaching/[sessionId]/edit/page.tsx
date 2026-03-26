@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { SessionForm } from '@/components/teaching/SessionForm'
 import { ChevronLeft } from 'lucide-react'
+import { getEnabledChurchLessonTypes } from '@/lib/lesson-types'
 
 interface Props { params: { churchSlug: string; sessionId: string } }
 
@@ -25,7 +26,6 @@ export default async function EditSessionPage({ params }: Props) {
     .single()
   if (!session) return notFound()
 
-  // Check if this session belongs to a series — if so, date is locked to series
   const { data: seriesLink } = await supabaseAdmin
     .from('series_sessions')
     .select('series_id, week_number, series(id, title)')
@@ -34,13 +34,16 @@ export default async function EditSessionPage({ params }: Props) {
 
   const seriesContext = seriesLink
     ? {
-        seriesId:    (seriesLink.series as any)?.id as string,
+        seriesId: (seriesLink.series as any)?.id as string,
         seriesTitle: (seriesLink.series as any)?.title as string,
-        weekNumber:  seriesLink.week_number,
+        weekNumber: seriesLink.week_number,
       }
     : null
 
-  const { data: flows } = await supabaseAdmin.from('flows').select('*').eq('church_id', church.id).eq('teacher_id', user.id).order('name')
+  const [flowsResult, lessonTypes] = await Promise.all([
+    supabaseAdmin.from('flows').select('*').eq('church_id', church.id).eq('teacher_id', user.id).order('name'),
+    getEnabledChurchLessonTypes(church.id),
+  ])
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
@@ -49,7 +52,14 @@ export default async function EditSessionPage({ params }: Props) {
       </Link>
       <h1 className="text-2xl font-bold text-slate-900 mb-8">Edit session</h1>
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <SessionForm churchId={church.id} churchSlug={churchSlug} session={session} flows={flows ?? []} seriesContext={seriesContext} />
+        <SessionForm
+          churchId={church.id}
+          churchSlug={churchSlug}
+          session={session}
+          flows={flowsResult.data ?? []}
+          lessonTypes={lessonTypes}
+          seriesContext={seriesContext}
+        />
       </div>
     </div>
   )

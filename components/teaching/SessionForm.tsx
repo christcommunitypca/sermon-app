@@ -1,14 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { createSessionAction, updateSessionAction } from '@/app/(app)/[churchSlug]/teaching/actions'
-import { Flow, SessionType, TeachingSession } from '@/types/database'
-
-const SESSION_TYPES: { value: SessionType; label: string }[] = [
-  { value: 'sermon', label: 'Sermon' },
-  { value: 'sunday_school', label: 'Sunday School' },
-  { value: 'bible_study', label: 'Bible Study' },
-]
+import { Flow, TeachingSession } from '@/types/database'
+import type { LessonTypeOption } from '@/lib/lesson-types'
 
 const VISIBILITY_OPTIONS: { value: string; label: string; desc: string }[] = [
   { value: 'private', label: 'Private', desc: 'Only you' },
@@ -26,12 +22,9 @@ interface Props {
   churchSlug: string
   session?: TeachingSession
   flows?: Flow[]
+  lessonTypes?: LessonTypeOption[]
   selectedFlowId?: string
   seriesContext?: SeriesContext | null
-}
-
-function typeLabel(type: SessionType) {
-  return SESSION_TYPES.find(t => t.value === type)?.label ?? type
 }
 
 export function SessionForm({
@@ -39,43 +32,28 @@ export function SessionForm({
   churchSlug,
   session,
   flows = [],
+  lessonTypes = [],
   selectedFlowId,
   seriesContext,
 }: Props) {
   const isEdit = !!session
   const action = isEdit ? updateSessionAction : createSessionAction
 
-  const [typeValue, setTypeValue] = useState<SessionType>(session?.type ?? 'sermon')
-  const [selectedFlowIdState, setSelectedFlowIdState] = useState(
-    session?.selected_flow_id ?? selectedFlowId ?? ''
-  )
+  const initialType = session?.type ?? lessonTypes[0]?.key ?? 'sermon'
+  const [lessonType, setLessonType] = useState(initialType)
 
-  useEffect(() => {
-    if (session?.selected_flow_id) return
-    if (selectedFlowIdState) return
-    const defaultMatch = flows.find(flow => flow.is_default_for === typeValue)
-    if (defaultMatch) setSelectedFlowIdState(defaultMatch.id)
-  }, [flows, selectedFlowIdState, session?.selected_flow_id, typeValue])
+  const fallbackDefaultFlowId = useMemo(() => {
+    const matched = lessonTypes.find(type => type.key === lessonType)
+    return matched?.default_flow_id ?? ''
+  }, [lessonTypes, lessonType])
 
-  const sortedFlows = useMemo(() => {
-    const ranked = [...flows]
-    ranked.sort((a, b) => {
-      const score = (flow: Flow) => {
-        if (flow.id === selectedFlowIdState) return 100
-        if (flow.is_default_for === typeValue) return 80
-        if ((flow.recommended_for ?? []).includes(typeValue)) return 60
-        return 0
-      }
-      return score(b) - score(a) || a.name.localeCompare(b.name)
-    })
-    return ranked
-  }, [flows, selectedFlowIdState, typeValue])
+  const effectiveSelectedFlowId =
+    session?.selected_flow_id ?? selectedFlowId ?? fallbackDefaultFlowId ?? ''
 
   return (
     <form action={action} className="space-y-5">
       <input type="hidden" name="churchId" value={churchId} />
       <input type="hidden" name="churchSlug" value={churchSlug} />
-      <input type="hidden" name="flow_id" value={selectedFlowIdState} />
       {isEdit && <input type="hidden" name="sessionId" value={session.id} />}
 
       <div>
@@ -93,15 +71,15 @@ export function SessionForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Lesson type</label>
           <select
             name="type"
-            value={typeValue}
-            onChange={e => setTypeValue(e.target.value as SessionType)}
+            value={lessonType}
+            onChange={e => setLessonType(e.target.value)}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
           >
-            {SESSION_TYPES.map(t => (
-              <option key={t.value} value={t.value}>{t.label}</option>
+            {lessonTypes.map(t => (
+              <option key={t.key} value={t.key}>{t.label}</option>
             ))}
           </select>
         </div>
@@ -119,6 +97,10 @@ export function SessionForm({
           </select>
         </div>
       </div>
+
+      {!!lessonTypes.find(t => t.key === lessonType)?.description && (
+        <p className="text-xs text-slate-500 -mt-2">{lessonTypes.find(t => t.key === lessonType)?.description}</p>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         {isEdit && (
@@ -140,21 +122,11 @@ export function SessionForm({
             <div className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm text-slate-500">
               {session?.scheduled_date
                 ? new Date(session.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
+                    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
                   })
                 : 'Set by series'}
               <p className="text-xs text-slate-400 mt-0.5">
-                Managed in{' '}
-                <a
-                  href={`/${churchSlug}/series/${seriesContext.seriesId}`}
-                  className="text-violet-600 hover:underline"
-                >
-                  {seriesContext.seriesTitle}
-                </a>{' '}
-                · Week {seriesContext.weekNumber}
+                Managed in <a href={`/${churchSlug}/series/${seriesContext.seriesId}`} className="text-violet-600 hover:underline">{seriesContext.seriesTitle}</a> · Week {seriesContext.weekNumber}
               </p>
             </div>
           ) : (
@@ -177,65 +149,42 @@ export function SessionForm({
           max="240"
           defaultValue={session?.estimated_duration ?? ''}
           placeholder="30"
-          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 w-40"
+          className="w-40 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
         />
       </div>
 
-      {flows.length > 0 && (
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-slate-700">Sermon flow</label>
-            <p className="text-xs text-slate-400 mt-1">Choose the preaching path this lesson should follow. Flow steps will guide outline generation and prompt preview.</p>
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-slate-700">Flow</label>
+        {flows.length === 0 ? (
+          <div className="border border-dashed border-slate-300 rounded-xl p-4 bg-slate-50">
+            <p className="text-sm text-slate-600">No flows created yet for this church.</p>
+            <Link href={`/${churchSlug}/settings/church-setup/flows`} className="inline-flex mt-3 text-sm font-medium text-violet-700 hover:text-violet-800">
+              Create a Flow
+            </Link>
           </div>
-
-          <div className="grid gap-3">
-            <button
-              type="button"
-              onClick={() => setSelectedFlowIdState('')}
-              className={`text-left border rounded-xl p-4 transition-colors ${selectedFlowIdState === '' ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}
+        ) : (
+          <>
+            <select
+              name="flow_id"
+              defaultValue={effectiveSelectedFlowId}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
             >
-              <div className="text-sm font-medium text-slate-900">No flow</div>
-              <div className="text-xs text-slate-500 mt-1">Start with a blank outline movement.</div>
-            </button>
-
-            {sortedFlows.map(flow => {
-              const isSelected = selectedFlowIdState === flow.id
-              const isDefault = flow.is_default_for === typeValue
-              const isRecommended = (flow.recommended_for ?? []).includes(typeValue)
-              return (
-                <button
-                  key={flow.id}
-                  type="button"
-                  onClick={() => setSelectedFlowIdState(flow.id)}
-                  className={`text-left border rounded-xl p-4 transition-colors ${isSelected ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-slate-900">{flow.name}</div>
-                      {flow.description && <div className="text-xs text-slate-500 mt-1">{flow.description}</div>}
-                    </div>
-                    <div className="flex flex-wrap justify-end gap-1.5">
-                      {isDefault && <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Default for {typeLabel(typeValue)}</span>}
-                      {!isDefault && isRecommended && <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">Recommended</span>}
-                    </div>
-                  </div>
-                  {flow.explanation && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{flow.explanation}</p>}
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {flow.steps.slice(0, 5).map((step, i) => (
-                      <span key={step.id ?? i} className="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
-                        {step.title}
-                      </span>
-                    ))}
-                    {flow.steps.length > 5 && (
-                      <span className="text-[11px] text-slate-400">+{flow.steps.length - 5} more</span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
+              <option value="">No flow — start blank</option>
+              {flows.map(flow => (
+                <option key={flow.id} value={flow.id}>{flow.name}</option>
+              ))}
+            </select>
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>
+                {fallbackDefaultFlowId ? 'The church default for this lesson type is preselected when available.' : 'Choose a flow only if you want one to guide outline generation.'}
+              </span>
+              <Link href={`/${churchSlug}/settings/church-setup/flows`} className="font-medium text-violet-700 hover:text-violet-800">
+                Create a Flow
+              </Link>
+            </div>
+          </>
+        )}
+      </div>
 
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
@@ -249,16 +198,10 @@ export function SessionForm({
       </div>
 
       <div className="flex items-center gap-3 pt-2">
-        <button
-          type="submit"
-          className="px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
-        >
+        <button type="submit" className="px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
           {isEdit ? 'Save changes' : 'Create session'}
         </button>
-        <a
-          href={isEdit ? `/${churchSlug}/teaching/${session.id}` : `/${churchSlug}/teaching`}
-          className="text-sm text-slate-500 hover:text-slate-700"
-        >
+        <a href={isEdit ? `/${churchSlug}/teaching/${session.id}` : `/${churchSlug}/teaching`} className="text-sm text-slate-500 hover:text-slate-700">
           Cancel
         </a>
       </div>

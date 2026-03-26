@@ -7,6 +7,7 @@ import { updateStudyModeAction } from '@/app/actions/verse-study'
 import type { OutlineBlock, VerseNote } from '@/types/database'
 import type { VerseData } from '@/lib/esv'
 import { TeachingNavToggleButton } from './TeachingNavToggleButton'
+
 import {
   buildOutlinePromptParts,
   renderOutlinePromptForHuman,
@@ -268,25 +269,9 @@ export function TeachingWorkspace({
       <div className={`mb-3 ${focusMode ? 'sticky top-2 z-20 rounded-xl border border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80' : ''}`}>
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-2 min-w-0">
 <div className="flex items-center gap-2 shrink-0 min-w-0">
-  <div className="w-9 flex justify-center shrink-0">
-    {focusMode ? (
-      <button
-        type="button"
-        onClick={() => {
-          const nav = document.getElementById('teaching-nav-flyout-toggle')
-          ;(nav as HTMLButtonElement | null)?.click()
-        }}
-        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-        title="Show menu"
-      >
-        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <path d="M4 6h16" />
-          <path d="M4 12h16" />
-          <path d="M4 18h16" />
-        </svg>
-      </button>
-    ) : null}
-  </div>
+<div className="w-9 flex justify-center shrink-0">
+  {focusMode ? <TeachingNavToggleButton /> : null}
+</div>
 
   <div className="flex items-center p-1 bg-slate-100 rounded-xl shrink-0">
     <button
@@ -441,6 +426,7 @@ export function TeachingWorkspace({
   />
 ) : (
   <VerseByVersePanel
+    key={`study-${pericopeMode}-${activeSectionIdx}-${showOutlinePane ? 'outline' : 'study'}`}
     sessionId={sessionId}
     churchId={churchId}
     scriptureRef={localScriptureRef}

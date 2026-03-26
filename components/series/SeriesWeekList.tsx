@@ -76,11 +76,13 @@ interface Props {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SeriesWeekList({ sessions, seriesId, churchSlug, startDate, createWeekSession }: Props) {
-  const [insertingAfter, setInsertingAfter] = useState<number | null>(null) // week_number
-  const [deletingId,     setDeletingId]     = useState<string | null>(null)
-  const [isPending,      startTransition]   = useTransition()
+  const [insertingAfter, setInsertingAfter] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
 
-  const verseConflicts = computeConflicts(sessions)
+  const activeSessions = sessions.filter(ss => (ss.teaching_sessions?.status ?? '') !== 'archived')
+  const archivedSessions = sessions.filter(ss => (ss.teaching_sessions?.status ?? '') === 'archived')
+  const verseConflicts = computeConflicts(activeSessions)
 
   function computeWeekDate(weekNumber: number): string | null {
     if (!startDate) return null
@@ -98,58 +100,57 @@ export function SeriesWeekList({ sessions, seriesId, churchSlug, startDate, crea
     })
   }
 
-  return (
-    <div className="space-y-0">
-      {sessions.map((ss, idx) => {
-        const weekDateStr   = computeWeekDate(ss.week_number)
-        const weekDateLabel = weekDateStr
-          ? new Date(weekDateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-          : null
-        const linkedSession = ss.teaching_sessions ?? null
-        const sessionScheduledDate = linkedSession?.scheduled_date ?? null
-        const hasDateConflict = !!(weekDateStr && sessionScheduledDate && sessionScheduledDate !== weekDateStr)
-        const hasVerseConflict = verseConflicts.has(ss.id)
-        const canDelete = ss.week_type !== 'normal' || (!ss.session_id && ss.status === 'planned')
+  function renderRows(list: SessionRow[], archived = false) {
+    return list.map((ss, idx) => {
+      const weekDateStr = computeWeekDate(ss.week_number)
+      const weekDateLabel = weekDateStr
+        ? new Date(weekDateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : null
+      const linkedSession = ss.teaching_sessions ?? null
+      const sessionScheduledDate = linkedSession?.scheduled_date ?? null
+      const hasDateConflict = !!(!archived && weekDateStr && sessionScheduledDate && sessionScheduledDate !== weekDateStr)
+      const hasVerseConflict = !archived && verseConflicts.has(ss.id)
+      const canDelete = ss.week_type !== 'normal' || (!ss.session_id && ss.status === 'planned')
 
-        return (
-          <div key={ss.id}>
-            {/* Insert button BEFORE first week */}
-            {idx === 0 && (
-              <InsertButton
-                weekNumber={0}
-                insertingAfter={insertingAfter}
-                onInsert={() => setInsertingAfter(0)}
-                onClose={() => setInsertingAfter(null)}
-                insertedDate={computeWeekDate(1)}
-                newWeekNumber={1}
-                seriesId={seriesId}
-                churchSlug={churchSlug}
-              />
-            )}
+      return (
+        <div key={ss.id}>
+          {!archived && idx === 0 && (
+            <InsertButton
+              weekNumber={0}
+              insertingAfter={insertingAfter}
+              onInsert={() => setInsertingAfter(0)}
+              onClose={() => setInsertingAfter(null)}
+              insertedDate={computeWeekDate(1)}
+              newWeekNumber={1}
+              seriesId={seriesId}
+              churchSlug={churchSlug}
+            />
+          )}
 
-            {/* Week row */}
-            <div className="relative group/row">
-              <SeriesWeekExpander
-                ss={ss}
-                linkedSession={linkedSession}
-                weekDate={weekDateLabel}
-                weekDateIso={weekDateStr}
-                hasConflict={hasDateConflict}
-                conflictDate={hasDateConflict ? sessionScheduledDate : null}
-                churchSlug={churchSlug}
-                seriesId={seriesId}
-                createWeekSession={createWeekSession}
-                extraBadge={hasVerseConflict ? (
-                  <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 flex items-center gap-1">
-                    <AlertCircle className="w-2.5 h-2.5" />Verse conflict
-                  </span>
-                ) : null}
-                onDelete={canDelete ? () => handleDelete(ss) : null}
-                isDeleting={deletingId === ss.id}
-              />
-            </div>
+          <div className={`relative group/row ${archived ? 'opacity-80' : ''}`}>
+            <SeriesWeekExpander
+              ss={ss}
+              linkedSession={linkedSession}
+              weekDate={weekDateLabel}
+              weekDateIso={weekDateStr}
+              hasConflict={hasDateConflict}
+              conflictDate={hasDateConflict ? sessionScheduledDate : null}
+              churchSlug={churchSlug}
+              seriesId={seriesId}
+              createWeekSession={createWeekSession}
+              extraBadge={hasVerseConflict ? (
+                <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 flex items-center gap-1">
+                  <AlertCircle className="w-2.5 h-2.5" />Verse conflict
+                </span>
+              ) : archived ? (
+                <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200">Archived</span>
+              ) : null}
+              onDelete={!archived && canDelete ? () => handleDelete(ss) : null}
+              isDeleting={deletingId === ss.id}
+            />
+          </div>
 
-            {/* Insert button AFTER this week */}
+          {!archived && (
             <InsertButton
               weekNumber={ss.week_number}
               insertingAfter={insertingAfter}
@@ -160,10 +161,21 @@ export function SeriesWeekList({ sessions, seriesId, churchSlug, startDate, crea
               seriesId={seriesId}
               churchSlug={churchSlug}
             />
-          </div>
-        )
-      })}
+          )}
+        </div>
+      )
+    })
+  }
 
+  return (
+    <div className="space-y-0">
+      {renderRows(activeSessions)}
+      {archivedSessions.length > 0 && (
+        <details className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-stone-700">Archived lessons ({archivedSessions.length})</summary>
+          <div className="mt-3 space-y-2">{renderRows(archivedSessions, true)}</div>
+        </details>
+      )}
       {sessions.length === 0 && (
         <p className="text-center py-10 text-slate-400 text-sm">No weeks planned yet.</p>
       )}

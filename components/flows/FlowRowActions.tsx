@@ -25,7 +25,7 @@ export function FlowRowActions({ flowId, churchId, churchSlug, isArchived }: Pro
   }
 
   async function handleDelete() {
-    await deleteFlowAction(flowId, churchId, churchSlug)
+    await deleteFlowAction(flowId, churchSlug)
     router.refresh()
   }
 

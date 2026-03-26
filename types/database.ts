@@ -5,7 +5,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json } | 
 
 export type Role = 'owner' | 'admin' | 'teacher'
 export type SessionStatus = 'draft' | 'published' | 'delivered' | 'archived'
-export type SessionType = 'sermon' | 'sunday_school' | 'bible_study'
+export type SessionType = 'sermon' | 'sunday_school' | 'bible_study' | (string & {})
 export type Visibility = 'private' | 'church' | 'public'
 export type BlockType = 'point' | 'sub_point' | 'scripture' | 'illustration' | 'application' | 'transition'
 export type Confidence = 'high' | 'medium' | 'low'
@@ -89,6 +89,20 @@ export interface UserAIKey {
   updated_at: string
 }
 
+
+export interface ChurchLessonType {
+  id: string
+  church_id: string
+  key: string
+  label: string
+  description: string | null
+  is_enabled: boolean
+  sort_order: number
+  default_flow_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface TeachingSession {
   id: string
   church_id: string
@@ -131,6 +145,7 @@ export interface Flow {
   archived_at: string | null
   created_at: string
   updated_at: string
+  owner_user_id: string | null
 }
 
 /**

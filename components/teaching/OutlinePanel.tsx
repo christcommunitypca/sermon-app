@@ -27,8 +27,9 @@ import {
   renderOutlinePromptForLLM,
   type OutlineSelectedFlow,
   type OutlineSelectedInsight,
-  type OutlineResearchDepth,
 } from '@/lib/outlinePrompt'
+
+import type { OutlineResearchDepth, OutlineCustomSettings } from '@/lib/ai/types'
 
 const BLOCK_TYPE_LABELS: Record<OutlineBlock['type'], string> = {
   point: 'Point',
@@ -38,6 +39,8 @@ const BLOCK_TYPE_LABELS: Record<OutlineBlock['type'], string> = {
   application: 'Application',
   transition: 'Transition',
 }
+
+
 
 // Visual weight per block type — section headers get bold + larger styling
 const BLOCK_IS_SECTION = (type: OutlineBlock['type']) =>
@@ -53,6 +56,7 @@ const BLOCK_BORDER_COLORS: Record<OutlineBlock['type'], string> = {
 }
 
 const MAX_DEPTH = 4
+const OUTLINE_SCRIPTURE_FONT_SIZES = [14, 16, 18, 20, 22] as const
 
 
 
@@ -65,6 +69,37 @@ type DraftOutlineOptions = {
   scope: DraftOutlineScope
   selectedVerseRefs: string[]
   depth: OutlineResearchDepth
+  customSettings?: OutlineCustomSettings
+}
+
+const QUICK_OUTLINE_CUSTOM_SETTINGS: OutlineCustomSettings = {
+  mainPointsMin: 2,
+  mainPointsMax: 4,
+  subPointsPerMainPointMin: 1,
+  subPointsPerMainPointMax: 2,
+  applicationBlocksMin: 1,
+  transitionBlocksMin: 1,
+}
+
+const DEEP_OUTLINE_CUSTOM_SETTINGS: OutlineCustomSettings = {
+  mainPointsMin: 3,
+  mainPointsMax: 5,
+  subPointsPerMainPointMin: 2,
+  subPointsPerMainPointMax: 4,
+  applicationBlocksMin: 2,
+  transitionBlocksMin: 1,
+}
+
+const OUTLINE_CUSTOM_SETTINGS_KEY = 'outline-custom-settings'
+
+function sanitizeOutlineCustomSettings(value?: Partial<OutlineCustomSettings> | null): OutlineCustomSettings {
+  const mainPointsMin = Math.max(1, Math.min(8, Number(value?.mainPointsMin ?? QUICK_OUTLINE_CUSTOM_SETTINGS.mainPointsMin)))
+  const mainPointsMax = Math.max(mainPointsMin, Math.min(10, Number(value?.mainPointsMax ?? QUICK_OUTLINE_CUSTOM_SETTINGS.mainPointsMax)))
+  const subPointsPerMainPointMin = Math.max(1, Math.min(6, Number(value?.subPointsPerMainPointMin ?? QUICK_OUTLINE_CUSTOM_SETTINGS.subPointsPerMainPointMin)))
+  const subPointsPerMainPointMax = Math.max(subPointsPerMainPointMin, Math.min(8, Number(value?.subPointsPerMainPointMax ?? QUICK_OUTLINE_CUSTOM_SETTINGS.subPointsPerMainPointMax)))
+  const applicationBlocksMin = Math.max(1, Math.min(6, Number(value?.applicationBlocksMin ?? QUICK_OUTLINE_CUSTOM_SETTINGS.applicationBlocksMin)))
+  const transitionBlocksMin = Math.max(1, Math.min(6, Number(value?.transitionBlocksMin ?? QUICK_OUTLINE_CUSTOM_SETTINGS.transitionBlocksMin)))
+  return { mainPointsMin, mainPointsMax, subPointsPerMainPointMin, subPointsPerMainPointMax, applicationBlocksMin, transitionBlocksMin }
 }
 
 interface Props {
@@ -97,6 +132,7 @@ interface Props {
   sessionNotes?: string | null
   scriptureRef?: string | null
 }
+
 
 function filterOutlineRefs<T extends { verseRef: string }>(items: T[], options: DraftOutlineOptions) {
   if (options.scope !== 'selected_verses') return items
@@ -144,6 +180,7 @@ export function OutlinePanel({
   const [aiProposed,   setAIProposed]   = useState<OutlineBlock[] | null>(null)
   const [aiError,      setAIError]      = useState<string | null>(null)
   const [hiddenVerses, setHiddenVerses] = useState<Set<string>>(new Set())
+  const [scriptureFontIdx, setScriptureFontIdx] = useState(0)
   
 
   // Register external trigger callbacks so workspace toolbar can fire these
@@ -382,15 +419,21 @@ export function OutlinePanel({
   function handleViewPrompt(
     selectedInsights?: OutlineSelectedInsight[],
     verseNotesForAI?: Record<string, string>,
-    researchDepth: OutlineResearchDepth = 'quick'
+    options: DraftOutlineOptions = { scope: 'all_verses', selectedVerseRefs: [], depth: 'quick' }
   ) {
+    const outlineConfig = {
+      scope: options.scope,
+      depth: options.depth,
+      verseRefs: options.scope === 'selected_verses' ? options.selectedVerseRefs : undefined,
+    }
+
     const parts = buildOutlinePromptParts({
       selectedFlow,
       selectedInsights,
       verseNotesForAI,
       thoughts: [],
       sessionEstimatedDuration: estimatedDuration,
-      researchDepth,
+      config: outlineConfig,
     })
 
     const sessionForPreview = {
@@ -399,6 +442,7 @@ export function OutlinePanel({
       scriptureRef: scriptureRef ?? initialVerses?.[0]?.verse_ref ?? null,
       notes: sessionNotes ?? null,
       estimatedDuration,
+      researchDepth: outlineConfig.depth,
     }
 
     const preview = renderOutlinePromptForHuman({
@@ -422,10 +466,17 @@ export function OutlinePanel({
   async function handleGenerateAI(
     selectedInsights?: OutlineSelectedInsight[],
     verseNotesForAI?: Record<string, string>,
-    researchDepth: OutlineResearchDepth = 'quick'
+    options: DraftOutlineOptions = { scope: 'all_verses', selectedVerseRefs: [], depth: 'quick' }
   ) {
     setAILoading(true)
     setAIError(null)
+
+    const outlineConfig = {
+      scope: options.scope,
+      depth: options.depth,
+      verseRefs: options.scope === 'selected_verses' ? options.selectedVerseRefs : undefined,
+    }
+
     try {
       const data = await generateOutlineAction({
         sessionId,
@@ -433,7 +484,7 @@ export function OutlinePanel({
         selectedFlow,
         selectedInsights,
         verseNotes: verseNotesForAI,
-        researchDepth,
+        config: outlineConfig,
       })
 
       if (data.error || !data.blocks) {
@@ -562,8 +613,37 @@ export function OutlinePanel({
   return (
     <>
     <div className="flex gap-3 min-h-[600px] overflow-x-hidden">
-      {/* ── Left: Outline editor ─────────────────────────────────────────── */}
-      <div className="w-[48%] min-w-0 flex-shrink-0 flex flex-col gap-3 relative">
+      <div className="w-[28%] min-w-0 flex-shrink-0 rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Scripture</span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setScriptureFontIdx(idx => Math.max(0, idx - 1))} disabled={scriptureFontIdx === 0} className={`h-7 w-7 rounded-lg border text-slate-500 transition-colors ${scriptureFontIdx === 0 ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 hover:bg-slate-50 hover:text-slate-700'}`}><span className="text-[11px] font-semibold leading-none">A</span></button>
+            <button type="button" onClick={() => setScriptureFontIdx(idx => Math.min(OUTLINE_SCRIPTURE_FONT_SIZES.length - 1, idx + 1))} disabled={scriptureFontIdx === OUTLINE_SCRIPTURE_FONT_SIZES.length - 1} className={`h-7 w-7 rounded-lg border text-slate-500 transition-colors ${scriptureFontIdx === OUTLINE_SCRIPTURE_FONT_SIZES.length - 1 ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 hover:bg-slate-50 hover:text-slate-700'}`}><span className="text-[15px] font-semibold leading-none">A</span></button>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-3">
+          <OutlineReference
+            verses={initialVerses}
+            insights={initialInsights}
+            verseNotes={initialVerseNotes}
+            hiddenVerses={hiddenVerses}
+            allVerseRefs={scopedVerseRefs}
+            onToggleVerse={toggleVerse}
+            sessionId={sessionId}
+            pendingItemId={pending?.sourceId ?? null}
+            onPendingItem={onPendingFromRef}
+            onInsightsChange={onInsightsChange}
+            activeTab="scripture"
+            hideTopTabs
+            hideFilters
+            allowedTabs={['scripture']}
+            scriptureFontSize={OUTLINE_SCRIPTURE_FONT_SIZES[scriptureFontIdx]}
+          />
+        </div>
+      </div>
+
+      {/* ── Middle: Outline editor ────────────────────────────────────────── */}
+      <div className="w-[44%] min-w-0 flex-shrink-0 flex flex-col gap-3 relative">
         {/* Snapshot input — shown inline when triggered from workspace toolbar */}
         {showSnapshotInput && (
           <div className="flex items-center gap-1">
@@ -691,25 +771,29 @@ export function OutlinePanel({
         )}
       </div>
 
-      {/* ── Right: Reference panel ───────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 overflow-y-auto flex flex-col gap-2 min-h-0">
-        <OutlineReference
-          verses={initialVerses}
-          insights={initialInsights}
-          verseNotes={initialVerseNotes}
-          hiddenVerses={hiddenVerses}
-          allVerseRefs={scopedVerseRefs}
-          onToggleVerse={toggleVerse}
-          sessionId={sessionId}
-          pendingItemId={pending?.sourceId ?? null}
-          onPendingItem={onPendingFromRef}
-          onInsightsChange={onInsightsChange}
-          activeTab={activeReferenceTab}
-          onActiveTabChange={(tab) => {
-            if (tab === 'notes' || tab === 'ai' || tab === 'scripture') onReferenceTabChange?.(tab)
-          }}
-          hideTopTabs
-        />
+      {/* ── Right: Research / notes panel ───────────────────────────────── */}
+      <div className="flex-1 min-w-0 rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+        <div className="px-3 py-2 border-b border-slate-100">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Research</span>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-3">
+          <OutlineReference
+            verses={initialVerses}
+            insights={initialInsights}
+            verseNotes={initialVerseNotes}
+            hiddenVerses={hiddenVerses}
+            allVerseRefs={scopedVerseRefs}
+            onToggleVerse={toggleVerse}
+            sessionId={sessionId}
+            pendingItemId={pending?.sourceId ?? null}
+            onPendingItem={onPendingFromRef}
+            onInsightsChange={onInsightsChange}
+            activeTab={activeReferenceTab === 'scripture' ? 'ai' : activeReferenceTab}
+            onActiveTabChange={(tab) => { if (tab === 'notes' || tab === 'ai') onReferenceTabChange?.(tab) }}
+            hideTopTabs
+            allowedTabs={['ai','notes']}
+          />
+        </div>
       </div>
 
       {/* Lesson summary modal */}
@@ -732,23 +816,17 @@ export function OutlinePanel({
             setShowDraftModal(false)
             const notesForAI = filterOutlineNotes(initialVerseNotes, options)
             const filteredInsights = filterOutlineRefs(selectedInsights, options)
-            handleGenerateAI(filteredInsights, notesForAI, options.depth)
+            handleGenerateAI(filteredInsights, notesForAI, options)
           }}
           onViewPrompt={(selectedInsights, options) => {
             const notesForAI = filterOutlineNotes(initialVerseNotes, options)
             const filteredInsights = filterOutlineRefs(selectedInsights, options)
-            handleViewPrompt(filteredInsights, notesForAI, options.depth)
+            handleViewPrompt(filteredInsights, notesForAI, options)
           }}
           onClose={() => setShowDraftModal(false)}
         />
       )}
-      {/* {showDraftModal && (
-  <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
-    <div className="bg-white rounded-2xl shadow-2xl p-8 text-black text-lg font-semibold">
-      DRAFT MODAL TEST
-    </div>
-  </div>
-)} */}
+
 
       {showPromptModal && (
         <PromptPreviewModal
@@ -1272,7 +1350,7 @@ function AssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview,
           icon={<Sparkles className="w-3.5 h-3.5" />}
           label={hasBlocks ? 'Redraft AI Outline' : 'AI Outline'}
           sublabel="AI builds an outline from your research & notes"
-          disabled={aiLoading || (scope === 'selected_verses' && selectedVerseRefs.length === 0)}
+          disabled={aiLoading}
           onClick={onDraftOutline}
         />
         <div className="h-px bg-slate-100 my-1" />
@@ -1323,12 +1401,15 @@ export function DraftOutlineModal({ insights, verseNotes, availableVerseRefs = [
   onViewPrompt: (selected: { verseRef: string; category: string; title: string; content: string }[], options: DraftOutlineOptions) => void
   onClose:     () => void
 }) {
-  // Build flat list of all research items
+  
+
+// Build flat list of all research items
   const allItems = Object.entries(insights).flatMap(([vRef, cats]) =>
     Object.entries(cats).flatMap(([cat, items]) =>
       items.map((item, i) => ({ vRef, cat, item, key: `${vRef}||${cat}||${i}` }))
     )
   )
+
 
   const defaultSelected = useMemo(() => {
     const flagged = allItems
@@ -1346,6 +1427,10 @@ export function DraftOutlineModal({ insights, verseNotes, availableVerseRefs = [
   ])).sort(), [availableVerseRefs, verseNotes, insights])
   const [scope, setScope] = useState<DraftOutlineScope>('all_verses')
   const [depth, setDepth] = useState<OutlineResearchDepth>('quick')
+  const [customSettings, setCustomSettings] = useState<OutlineCustomSettings>(() => {
+    if (typeof window === 'undefined') return QUICK_OUTLINE_CUSTOM_SETTINGS
+    try { return sanitizeOutlineCustomSettings(JSON.parse(window.localStorage.getItem(OUTLINE_CUSTOM_SETTINGS_KEY) ?? '{}')) } catch { return QUICK_OUTLINE_CUSTOM_SETTINGS }
+  })
   const [selectedVerseRefs, setSelectedVerseRefs] = useState<string[]>(allVerseRefs)
 
   useEffect(() => {
@@ -1355,6 +1440,10 @@ export function DraftOutlineModal({ insights, verseNotes, availableVerseRefs = [
   useEffect(() => {
     setSelectedVerseRefs(prev => prev.length ? prev.filter(ref => allVerseRefs.includes(ref)) : allVerseRefs)
   }, [allVerseRefs])
+
+  useEffect(() => {
+    try { window.localStorage.setItem(OUTLINE_CUSTOM_SETTINGS_KEY, JSON.stringify(customSettings)) } catch {}
+  }, [customSettings])
   const [showGenerateMenu, setShowGenerateMenu] = useState(false)
 const generateMenuRef = useRef<HTMLDivElement>(null)
 
@@ -1377,7 +1466,7 @@ useEffect(() => {
   function clearAll()   { setSelected(new Set()) }
 
   function buildOptions(): DraftOutlineOptions {
-    return { scope, depth, selectedVerseRefs }
+    return { scope, depth, selectedVerseRefs, customSettings: depth === 'custom' ? customSettings : undefined }
   }
 
   function handleGenerate() {
@@ -1466,16 +1555,33 @@ useEffect(() => {
 
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Depth</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button type="button" onClick={() => setDepth('quick')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'quick' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
                 <div className="text-sm font-medium">Quick Scan</div>
-                <div className="text-xs text-slate-400">Tighter outline. Fewer supporting layers and shorter development.</div>
+                <div className="text-xs text-slate-400">2–4 main points. 1–2 sub-points each.</div>
               </button>
               <button type="button" onClick={() => setDepth('deep')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'deep' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
                 <div className="text-sm font-medium">Deep Dive</div>
-                <div className="text-xs text-slate-400">Richer development. Fuller sub-points, transitions, explanations, and applications.</div>
+                <div className="text-xs text-slate-400">3–5 main points. Fuller development and applications.</div>
+              </button>
+              <button type="button" onClick={() => setDepth('custom')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'custom' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Custom</div>
+                <div className="text-xs text-slate-400">Edit the outline numbers and reuse them next time.</div>
               </button>
             </div>
+            {depth === 'custom' && (
+              <div className="mt-3 rounded-xl border border-slate-200 p-4 space-y-3">
+                <p className="text-xs font-semibold text-slate-700">Custom settings</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <OutlineNumberField label="Min main points" value={customSettings.mainPointsMin} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, mainPointsMin: value }))} min={1} max={8} />
+                  <OutlineNumberField label="Max main points" value={customSettings.mainPointsMax} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, mainPointsMax: value }))} min={1} max={10} />
+                  <OutlineNumberField label="Min sub-points per main point" value={customSettings.subPointsPerMainPointMin} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, subPointsPerMainPointMin: value }))} min={1} max={6} />
+                  <OutlineNumberField label="Max sub-points per main point" value={customSettings.subPointsPerMainPointMax} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, subPointsPerMainPointMax: value }))} min={1} max={8} />
+                  <OutlineNumberField label="Min application blocks" value={customSettings.applicationBlocksMin} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, applicationBlocksMin: value }))} min={1} max={6} />
+                  <OutlineNumberField label="Min transition blocks" value={customSettings.transitionBlocksMin} onChange={(value) => setCustomSettings(prev => sanitizeOutlineCustomSettings({ ...prev, transitionBlocksMin: value }))} min={1} max={6} />
+                </div>
+              </div>
+            )}
           </div>
           {allItems.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">No research yet — the outline will be built from your notes alone.</p>
@@ -1533,7 +1639,7 @@ useEffect(() => {
   <div className="relative" ref={generateMenuRef}>
     <button
       type="button"
-      disabled={aiLoading || (scope === 'selected_verses' && selectedVerseRefs.length === 0)}
+      disabled={aiLoading}
       onClick={() => setShowGenerateMenu(v => !v)}
       className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
     >
@@ -1576,6 +1682,10 @@ useEffect(() => {
       </div>
     </div>
   )
+}
+
+function OutlineNumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (value: number) => void; min: number; max: number }) {
+  return <label className="flex flex-col gap-1 text-[11px] text-slate-500"><span className="font-medium text-slate-600">{label}</span><input type="number" value={value} min={min} max={max} onChange={(e) => onChange(Number(e.target.value))} className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300" /></label>
 }
 
 // ── Drop zone — shown between blocks when a pending item is active ─────────────

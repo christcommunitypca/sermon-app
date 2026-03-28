@@ -12,8 +12,7 @@ import {
   buildOutlinePromptParts,
   renderOutlinePromptForHuman,
   renderOutlinePromptForLLM,
-  type OutlineSelectedFlow,
-  type OutlineResearchDepth,
+  type OutlineSelectedFlow
 } from '@/lib/outlinePrompt'
 import { OutlinePanel, DraftOutlineModal, PromptPreviewModal } from './OutlinePanel'
 export interface PendingItem {
@@ -158,7 +157,7 @@ export function TeachingWorkspace({
   const [pericopeSetupComplete, setPericopeSetupComplete] = useState((initialPericopeSetupComplete ?? false) || (initialPericSections?.length ?? 0) > 0)
   const [activeSectionIdx, setActiveSectionIdx] = useState(0)
   const [outlineSectionRefs, setOutlineSectionRefs] = useState<string[] | null>(null)
-  const [outlineReferenceTab, setOutlineReferenceTab] = useState<'scripture' | 'notes' | 'ai'>('scripture')
+  const [outlineReferenceTab, setOutlineReferenceTab] = useState<'scripture' | 'notes' | 'ai'>('ai')
   const [showReplaceOutlineModal, setShowReplaceOutlineModal] = useState(false)
   const [deletingOutline, setDeletingOutline] = useState(false)
   const [outlineAiLoading, setOutlineAiLoading] = useState(false)
@@ -369,7 +368,6 @@ export function TeachingWorkspace({
             {showOutlinePane ? (
               <div className="flex items-center gap-1.5 px-1 min-w-max">
                 {([
-                  ['scripture', 'Scripture'],
                   ['ai', 'AI'],
                   ['notes', 'Notes'],
                 ] as const).map(([tab, label]) => (
@@ -434,28 +432,6 @@ export function TeachingWorkspace({
   </>
 ) : (
   <>
-    {canTogglePanes && (
-      <div className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1 py-1">
-        {([
-          ['scripture', 'Scripture'],
-          ['notes', 'Notes'],
-          ['research', 'AI'],
-        ] as [PaneKey, string][]).map(([pane, label]) => (
-          <button
-            key={pane}
-            type="button"
-            onClick={() => handleTogglePane(pane)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
-              paneVisibility[pane]
-                ? 'bg-white text-slate-800 shadow-sm'
-                : 'text-slate-400 bg-transparent hover:text-slate-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    )}
 
     <button
       onClick={openGenerateOutlineFlow}
@@ -534,7 +510,7 @@ export function TeachingWorkspace({
     focusMode={focusMode}
     activeSectionIdx={activeSectionIdx}
     onActiveSectionChange={setActiveSectionIdx}
-    paneVisibility={paneVisibility}
+    paneVisibility={{ scripture: true, notes: true, research: true }}
   />
 )}
 
@@ -562,7 +538,12 @@ export function TeachingWorkspace({
             selectedFlow,
             verseNotes: notesForAI,
             selectedInsights: filteredInsights,
-            researchDepth: options.depth,
+            config: {
+              scope: options.scope,
+              depth: options.depth,
+              verseRefs: options.scope === 'selected_verses' ? options.selectedVerseRefs : undefined,
+              customSettings: options.depth === 'custom' ? options.customSettings : undefined,
+            },
           })
 
           if (!data.error && data.blocks) {
@@ -585,7 +566,12 @@ export function TeachingWorkspace({
         verseNotesForAI: notesForAI,
         thoughts: [],
         sessionEstimatedDuration: estimatedDuration,
-        researchDepth: options.depth,
+        config: {
+          scope: options.scope,
+          depth: options.depth,
+          verseRefs: options.scope === 'selected_verses' ? options.selectedVerseRefs : undefined,
+          customSettings: options.depth === 'custom' ? options.customSettings : undefined,
+        },
       })
     
       setHumanPromptPreview(
@@ -596,6 +582,7 @@ export function TeachingWorkspace({
             scriptureRef: localScriptureRef,
             notes: null,
             estimatedDuration,
+            researchDepth: options.depth,
           },
           parts,
           version: 'preview',
@@ -609,6 +596,7 @@ export function TeachingWorkspace({
           scriptureRef: localScriptureRef,
           notes: null,
           estimatedDuration,
+          researchDepth: options.depth,
         },
         parts,
         version: 'preview',

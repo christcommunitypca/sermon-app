@@ -51,6 +51,8 @@ export interface ProviderCredentials {
 
 export interface ProviderCompletion {
   parsed: unknown
+  raw_text?: string
+  parse_error?: string
   model: string
   provider: ProviderName
   duration_ms: number
@@ -76,6 +78,25 @@ export interface AIResultMeta {
 
 // ── Outline ───────────────────────────────────────────────────────────────────
 
+export type OutlineResearchScope = 'all_verses' | 'selected_verses'
+export type OutlineResearchDepth = 'quick' | 'deep' | 'custom'
+
+export interface OutlineCustomSettings {
+  mainPointsMin: number
+  mainPointsMax: number
+  subPointsPerMainPointMin: number
+  subPointsPerMainPointMax: number
+  applicationBlocksMin: number
+  transitionBlocksMin: number
+}
+
+export interface OutlinePromptConfig {
+  scope?: OutlineResearchScope
+  depth?: OutlineResearchDepth
+  verseRefs?: string[]
+  customSettings?: OutlineCustomSettings | null
+}
+
 export interface OutlineInput {
   session: {
     title: string
@@ -83,10 +104,12 @@ export interface OutlineInput {
     scriptureRef: string | null
     notes: string | null
     estimatedDuration?: number | null
+    researchDepth?: OutlineResearchDepth
   }
   thoughts: { content: string }[]
   selectedFlow?: OutlineSelectedFlow | null
   outlineId: string
+  config?: OutlinePromptConfig
   // Optional verse-study context (from Verse by Verse mode)
   verseNotes?: Record<string, string>
   selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
@@ -158,8 +181,26 @@ export interface TagResult extends AIResultMeta {
 }
 
 // ── Verse Insights ────────────────────────────────────────────────────────────
+export type VerseInsightScope = 'whole_passage' | 'selected_verses'
+export type VerseInsightDepth = 'quick' | 'deep' | 'custom'
+export type ResearchDepth = VerseInsightDepth
 
-export type ResearchDepth = 'quick' | 'deep'
+export interface VerseInsightCustomSettings {
+  itemsPerCategory: number
+  sentencesPerItemMin: number
+  sentencesPerItemMax: number
+  crossRefsPerItemMin: number
+  crossRefsPerItemMax: number
+  maxWordsPerCategory: number
+}
+
+export interface VerseInsightPromptConfig {
+  scope?: VerseInsightScope
+  depth?: VerseInsightDepth
+  verseRefs?: string[]
+  customSettings?: VerseInsightCustomSettings | null
+}
+
 
 export interface VerseInsightInput {
   verses: import('@/lib/esv').VerseData[]
@@ -168,7 +209,7 @@ export interface VerseInsightInput {
   tradition: string
   pastorNotes?: Record<string, string[]>   // verse_ref → notes[], sent as context to AI
   selectedWords?: Record<string, string[]> // verse_ref → words teacher wants studied
-  researchDepth?: ResearchDepth
+  config?: VerseInsightPromptConfig
 }
 
 export interface InsightItem {

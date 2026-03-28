@@ -4,24 +4,25 @@
 // Scripture spans full width; notes and AI research sit below in two columns.
 // Words can be selected directly from the Scripture text for pericope word study.
 
-import { useState, useCallback, useEffect, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   ChevronDown, Sparkles, Loader2, Check,
-  Plus, X, AlertCircle, ArrowUp, ArrowDown, Trash2, Wand2,
+  Plus, X, AlertCircle, ArrowUp, ArrowDown, Trash2,
 } from 'lucide-react'
 import type { VerseData, SectionHeader } from '@/lib/esv'
 import type { VerseNote } from '@/types/database'
 import {
   generatePericopeInsightsAction,
+  getPericopeInsightsPromptAction,
+  clearVerseInsightsAction,
   savePericopeSectionsAction,
   createVerseNoteAction,
   updateVerseNoteAction,
   deleteVerseNoteAction,
   reorderVerseNotesAction,
-  splitVerseNotesAction,
 } from '@/app/actions/verse-study'
 import { toggleInsightFlagAction } from '@/app/actions/verse-study'
-import type { ResearchDepth } from '@/lib/ai/types'
+import type { VerseInsightDepth, VerseInsightCustomSettings } from '@/lib/ai/types'
 import { parseWordStudyTitle } from '@/lib/word-study'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,11 @@ type InsightItem = {
 }
 type Insights    = Record<string, Record<string, InsightItem[]>>
 type SaveState   = 'idle' | 'saving' | 'saved' | 'error'
+const QUICK_SCAN_SETTINGS: VerseInsightCustomSettings = { itemsPerCategory: 2, sentencesPerItemMin: 1, sentencesPerItemMax: 2, crossRefsPerItemMin: 1, crossRefsPerItemMax: 1, maxWordsPerCategory: 120 }
+const DEEP_DIVE_SETTINGS: VerseInsightCustomSettings = { itemsPerCategory: 4, sentencesPerItemMin: 3, sentencesPerItemMax: 5, crossRefsPerItemMin: 2, crossRefsPerItemMax: 4, maxWordsPerCategory: 300 }
+const CUSTOM_RESEARCH_SETTINGS_KEY = 'pericope-research-custom-settings'
 const SHARED_INSIGHTS_KEY = 'session:shared'
+function sanitizeCustomSettings(value?: Partial<VerseInsightCustomSettings> | null): VerseInsightCustomSettings { return { itemsPerCategory: Math.max(1, Math.min(8, Number(value?.itemsPerCategory ?? 2))), sentencesPerItemMin: Math.max(1, Math.min(6, Number(value?.sentencesPerItemMin ?? 1))), sentencesPerItemMax: Math.max(1, Math.min(8, Number(value?.sentencesPerItemMax ?? 2))), crossRefsPerItemMin: Math.max(1, Math.min(6, Number(value?.crossRefsPerItemMin ?? 1))), crossRefsPerItemMax: Math.max(1, Math.min(8, Number(value?.crossRefsPerItemMax ?? 1))), maxWordsPerCategory: Math.max(40, Math.min(600, Number(value?.maxWordsPerCategory ?? 120))) } }
 type DisplayInsightItem = InsightItem & { __sourceRef: string; __sourceIndex: number; __shared?: boolean }
 
 function getDisplayInsightItems(
@@ -80,7 +85,7 @@ interface Props {
   hasHeaders: boolean
   insights: Insights
   verseNotes: Record<string, VerseNote[]>
-  onInsightsChange: (i: Insights) => void
+  onInsightsChange: Dispatch<SetStateAction<Insights>>
   onVerseNotesChange: (n: Record<string, VerseNote[]>) => void
   onSectionsChange: (s: SectionHeader[]) => void
   setupComplete: boolean
@@ -307,9 +312,13 @@ export function PericopePanel({
   const [activeCategoryBySection, setActiveCategoryBySection] = useState<Record<string, CategoryKey>>({})
   const [mobileTabBySection, setMobileTabBySection] = useState<Record<string, 'scripture' | 'notes' | 'research'>>({})
   const [generatingBySection, setGeneratingBySection] = useState<Record<string, boolean>>({})
-  const [organizingBySection, setOrganizingBySection] = useState<Record<string, boolean>>({})
-  const [researchDepthBySection, setResearchDepthBySection] = useState<Record<string, ResearchDepth>>({})
+  const [researchDepthBySection, setVerseInsightDepthBySection] = useState<Record<string, VerseInsightDepth>>({})
+  const [customResearchSettings, setCustomResearchSettings] = useState<VerseInsightCustomSettings>(() => {
+    if (typeof window === 'undefined') return QUICK_SCAN_SETTINGS
+    try { return sanitizeCustomSettings(JSON.parse(window.localStorage.getItem(CUSTOM_RESEARCH_SETTINGS_KEY) ?? '{}')) } catch { return QUICK_SCAN_SETTINGS }
+  })
   const [researchModalSectionKey, setResearchModalSectionKey] = useState<string | null>(null)
+  const [overwritePrompt, setOverwritePrompt] = useState<{ block: (typeof blocks)[number]; config: { scope?: 'section' | 'whole_passage'; depth?: VerseInsightDepth; customSettings?: VerseInsightCustomSettings } } | null>(null)
   const [researchPromptPreview, setResearchPromptPreview] = useState('')
   const [researchLLMPromptPreview, setResearchLLMPromptPreview] = useState('')
   const [showResearchPromptModal, setShowResearchPromptModal] = useState(false)
@@ -357,6 +366,9 @@ export function PericopePanel({
   useEffect(() => {
     localStorage.setItem('teaching-pane-widths', JSON.stringify(paneWidths))
   }, [paneWidths])
+  useEffect(() => {
+    try { localStorage.setItem(CUSTOM_RESEARCH_SETTINGS_KEY, JSON.stringify(customResearchSettings)) } catch {}
+  }, [customResearchSettings])
   
   useEffect(() => {
     function onMove(e: MouseEvent) {
@@ -408,14 +420,34 @@ export function PericopePanel({
   }
 
   
-async function handleGenerateForSection(
+function pericopeConfigForSection(
+  sectionKey: string,
+  config?: { scope?: 'section' | 'whole_passage'; depth?: VerseInsightDepth; customSettings?: VerseInsightCustomSettings }
+) {
+  const depth = config?.depth ?? researchDepthBySection[sectionKey] ?? 'quick'
+  const customSettings = sanitizeCustomSettings(config?.customSettings ?? customResearchSettings)
+  return {
+    scope: config?.scope ?? 'section',
+    depth,
+    customSettings,
+  }
+}
+
+function scopeBlocksForPericope(
   block: (typeof blocks)[number],
-  config?: { scope?: 'section' | 'whole_passage'; depth?: ResearchDepth }
+  scope: 'section' | 'whole_passage'
+) {
+  return scope === 'whole_passage' ? blocks : [block]
+}
+
+async function runGenerateForSection(
+  block: (typeof blocks)[number],
+  config?: { scope?: 'section' | 'whole_passage'; depth?: VerseInsightDepth; customSettings?: VerseInsightCustomSettings },
+  overwrite = false,
 ) {
   const sectionKey = block.sectionKey
-  const scope = config?.scope ?? 'section'
-  const depth = config?.depth ?? researchDepthBySection[sectionKey] ?? 'quick'
-  const targetBlocks = scope === 'whole_passage' ? blocks : [block]
+  const resolved = pericopeConfigForSection(sectionKey, config)
+  const targetBlocks = scopeBlocksForPericope(block, resolved.scope)
   const targetKeys = targetBlocks.map(entry => entry.sectionKey)
 
   setGeneratingBySection(prev => {
@@ -426,6 +458,14 @@ async function handleGenerateForSection(
   setError(null)
 
   try {
+    if (overwrite) {
+      const cleared = await clearVerseInsightsAction(sessionId, targetKeys)
+      if (cleared.error) {
+        setError(cleared.error)
+        return
+      }
+    }
+
     for (const entry of targetBlocks) {
       const entryKey = entry.sectionKey
       const result = await generatePericopeInsightsAction(
@@ -437,7 +477,10 @@ async function handleGenerateForSection(
           verses: entry.verses,
         },
         (selectedWordsBySection[entryKey] ?? []).slice(0, 5),
-        depth,
+        {
+          depth: resolved.depth,
+          customSettings: resolved.depth === 'custom' ? resolved.customSettings : null,
+        },
       )
 
       if (result.error) {
@@ -460,6 +503,7 @@ async function handleGenerateForSection(
     setMobileTabBySection(prev => ({ ...prev, [sectionKey]: 'research' }))
     setActiveCategoryBySection(prev => ({ ...prev, [sectionKey]: 'context' }))
     setResearchModalSectionKey(null)
+    setOverwritePrompt(null)
   } finally {
     setGeneratingBySection(prev => {
       const next = { ...prev }
@@ -469,26 +513,43 @@ async function handleGenerateForSection(
   }
 }
 
-
-
-function handleViewResearchPrompt(
+async function handleGenerateForSection(
   block: (typeof blocks)[number],
-  config?: { scope?: 'section' | 'whole_passage'; depth?: ResearchDepth }
+  config?: { scope?: 'section' | 'whole_passage'; depth?: VerseInsightDepth; customSettings?: VerseInsightCustomSettings }
 ) {
-  const sectionKey = block.sectionKey
-  const scope = config?.scope ?? 'section'
-  const depth = config?.depth ?? researchDepthBySection[sectionKey] ?? 'quick'
-  const preview = buildPericopeResearchPromptPreview({
-    scriptureRef: verses?.[0]?.verse_ref ?? null,
-    sectionLabel: titleDrafts[sectionKey] || block.section.label,
-    sectionVerses: block.verses,
-    wholePassageVerses: verses,
-    selectedWords: (selectedWordsBySection[sectionKey] ?? []).slice(0, 5),
-    depth,
-    scope,
-  })
-  setResearchPromptPreview(preview.humanPrompt)
-  setResearchLLMPromptPreview(preview.llmPrompt)
+  const resolved = pericopeConfigForSection(block.sectionKey, config)
+  const targetBlocks = scopeBlocksForPericope(block, resolved.scope)
+  const hasExistingResearch = targetBlocks.some(entry => sectionHasResearch(entry.sectionKey))
+  if (hasExistingResearch) {
+    setOverwritePrompt({ block, config: resolved })
+    return
+  }
+  await runGenerateForSection(block, resolved, false)
+}
+
+async function handleViewResearchPrompt(
+  block: (typeof blocks)[number],
+  config?: { scope?: 'section' | 'whole_passage'; depth?: VerseInsightDepth; customSettings?: VerseInsightCustomSettings }
+) {
+  const resolved = pericopeConfigForSection(block.sectionKey, config)
+  const targetBlocks = scopeBlocksForPericope(block, resolved.scope)
+  setError(null)
+  const result = await getPericopeInsightsPromptAction(
+    sessionId,
+    targetBlocks.map(entry => ({
+      label: titleDrafts[entry.sectionKey] || entry.section.label,
+      startVerse: entry.section.startVerse,
+      verses: entry.verses,
+    })),
+    Object.fromEntries(targetBlocks.map(entry => [entry.sectionKey, (selectedWordsBySection[entry.sectionKey] ?? []).slice(0, 5)])),
+    { depth: resolved.depth, customSettings: resolved.depth === 'custom' ? resolved.customSettings : null },
+  )
+  if (result.error || !result.humanPrompt || !result.llmPrompt) {
+    setError(result.error ?? 'Could not build research prompt.')
+    return
+  }
+  setResearchPromptPreview(result.humanPrompt)
+  setResearchLLMPromptPreview(result.llmPrompt)
   setShowResearchPromptModal(true)
 }
 
@@ -577,20 +638,6 @@ function handleViewResearchPrompt(
     await reorderVerseNotesAction(notes.map(n => n.id))
   }
 
-  async function handleOrganizeSectionNotes(sectionKey: string) {
-    const ids = (verseNotes[sectionKey] ?? []).map(note => note.id)
-    if (!ids.length) return
-
-    setOrganizingBySection(prev => ({ ...prev, [sectionKey]: true }))
-    const result = await splitVerseNotesAction(sessionId, churchId, ids)
-    setOrganizingBySection(prev => ({ ...prev, [sectionKey]: false }))
-
-    if (result.error) {
-      setError(result.error)
-      return
-    }
-    onVerseNotesChange(result.verseNotes)
-  }
 
   const showSetupEditor = !setupComplete
   if (showSetupEditor) {
@@ -895,17 +942,6 @@ function handleViewResearchPrompt(
                   onBlur={() => handleSaveTitle(block)}
                   className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-slate-800 focus:outline-none"
                 />
-                {notes.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => handleOrganizeSectionNotes(sectionKey)}
-                    disabled={organizingBySection[sectionKey]}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-violet-200 text-violet-700 text-[11px] hover:bg-violet-50 disabled:opacity-50 shrink-0"
-                  >
-                    {organizingBySection[sectionKey] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                    Organize notes
-                  </button>
-                )}
                 {titleSavingBySection[sectionKey] && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300" />}
                 <button
                   onClick={() => setResearchModalSectionKey(sectionKey)}
@@ -975,14 +1011,24 @@ function handleViewResearchPrompt(
           <PericopeResearchConfigModal
             sectionLabel={titleDrafts[researchModalSectionKey] || block.section.label}
             depth={depth}
-            onDepthChange={(value) => setResearchDepthBySection(prev => ({ ...prev, [researchModalSectionKey]: value }))}
+            customSettings={customResearchSettings}
+            onDepthChange={(value) => setVerseInsightDepthBySection(prev => ({ ...prev, [researchModalSectionKey]: value }))}
+            onCustomSettingsChange={setCustomResearchSettings}
             onClose={() => setResearchModalSectionKey(null)}
-            onViewPrompt={(scope) => handleViewResearchPrompt(block, { scope, depth })}
-            onGenerate={(scope) => handleGenerateForSection(block, { scope, depth })}
+            onViewPrompt={(scope, modalConfig) => handleViewResearchPrompt(block, { scope, depth: modalConfig.depth, customSettings: modalConfig.customSettings })}
+            onGenerate={(scope, modalConfig) => handleGenerateForSection(block, { scope, depth: modalConfig.depth, customSettings: modalConfig.customSettings })}
             generating={generating}
           />
         )
       })()}
+
+      {overwritePrompt && (
+        <OverwriteResearchModal
+          generating={Object.values(generatingBySection).some(Boolean)}
+          onClose={() => setOverwritePrompt(null)}
+          onConfirm={() => runGenerateForSection(overwritePrompt.block, overwritePrompt.config, true)}
+        />
+      )}
 
       {showResearchPromptModal && (
         <PericopePromptPreviewModal
@@ -998,29 +1044,36 @@ function handleViewResearchPrompt(
 function PericopeResearchConfigModal({
   sectionLabel,
   depth,
+  customSettings,
   onDepthChange,
+  onCustomSettingsChange,
   onClose,
   onViewPrompt,
   onGenerate,
   generating,
 }: {
   sectionLabel: string
-  depth: ResearchDepth
-  onDepthChange: (depth: ResearchDepth) => void
+  depth: VerseInsightDepth
+  customSettings: VerseInsightCustomSettings
+  onDepthChange: (depth: VerseInsightDepth) => void
+  onCustomSettingsChange: (settings: VerseInsightCustomSettings) => void
   onClose: () => void
-  onViewPrompt: (scope: 'section' | 'whole_passage') => void
-  onGenerate: (scope: 'section' | 'whole_passage') => void
+  onViewPrompt: (scope: 'section' | 'whole_passage', config: { depth: VerseInsightDepth; customSettings?: VerseInsightCustomSettings }) => void
+  onGenerate: (scope: 'section' | 'whole_passage', config: { depth: VerseInsightDepth; customSettings?: VerseInsightCustomSettings }) => void
   generating: boolean
 }) {
   const [scope, setScope] = useState<'section' | 'whole_passage'>('section')
   const disabled = generating
+  function field(key: keyof VerseInsightCustomSettings, value: number) { onCustomSettingsChange(sanitizeCustomSettings({ ...customSettings, [key]: value })) }
+  const effective = depth === 'custom' ? sanitizeCustomSettings(customSettings) : depth === 'deep' ? DEEP_DIVE_SETTINGS : QUICK_SCAN_SETTINGS
+  const config = { depth, customSettings: depth === 'custom' ? customSettings : undefined }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+      <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Generate AI Research</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Choose the scope and depth, then either preview the prompt or send it to AI.</p>
+            <p className="text-xs text-slate-400 mt-0.5">Choose the scope, depth, and numeric limits.</p>
           </div>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
@@ -1040,23 +1093,29 @@ function PericopeResearchConfigModal({
           </div>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Depth</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button type="button" onClick={() => onDepthChange('quick')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'quick' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
                 <div className="text-sm font-medium">Quick Scan</div>
-                <div className="text-xs text-slate-400">A lighter first pass with fewer items and shorter explanations.</div>
+                <div className="text-xs text-slate-400">2 items per category · 1–2 sentences per item.</div>
               </button>
               <button type="button" onClick={() => onDepthChange('deep')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'deep' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
                 <div className="text-sm font-medium">Deep Dive</div>
-                <div className="text-xs text-slate-400">Richer output with more items, more context, fuller theology, and stronger application.</div>
+                <div className="text-xs text-slate-400">4 items per category · 3–5 sentences per item.</div>
+              </button>
+              <button type="button" onClick={() => onDepthChange('custom')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'custom' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Custom</div>
+                <div className="text-xs text-slate-400">Edit the numbers and keep them for next time.</div>
               </button>
             </div>
           </div>
+          {depth === 'custom' && <div className="rounded-xl border border-slate-200 p-4 space-y-3"><p className="text-xs font-semibold text-slate-700">Custom settings</p><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"><NumberField label="Items per category" value={customSettings.itemsPerCategory} onChange={(value) => field('itemsPerCategory', value)} min={1} max={8} /><NumberField label="Min sentences per item" value={customSettings.sentencesPerItemMin} onChange={(value) => field('sentencesPerItemMin', value)} min={1} max={6} /><NumberField label="Max sentences per item" value={customSettings.sentencesPerItemMax} onChange={(value) => field('sentencesPerItemMax', value)} min={1} max={8} /><NumberField label="Min supporting refs" value={customSettings.crossRefsPerItemMin} onChange={(value) => field('crossRefsPerItemMin', value)} min={1} max={6} /><NumberField label="Max supporting refs" value={customSettings.crossRefsPerItemMax} onChange={(value) => field('crossRefsPerItemMax', value)} min={1} max={8} /><NumberField label="Max words per category" value={customSettings.maxWordsPerCategory} onChange={(value) => field('maxWordsPerCategory', value)} min={40} max={600} step={10} /></div></div>}
+          <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-500">Current output target: {effective.itemsPerCategory} items per category, {effective.sentencesPerItemMin}–{effective.sentencesPerItemMax} sentences per item, {effective.crossRefsPerItemMin}–{effective.crossRefsPerItemMax} supporting references, about {effective.maxWordsPerCategory} words max per category.</div>
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
           <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Cancel</button>
           <div className="flex items-center gap-2">
-            <button onClick={() => onViewPrompt(scope)} disabled={disabled} className="px-4 py-2 text-xs font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50">View Prompt</button>
-            <button onClick={() => onGenerate(scope)} disabled={disabled} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50">
+            <button onClick={() => onViewPrompt(scope, config)} disabled={disabled} className="px-4 py-2 text-xs font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50">View Prompt</button>
+            <button onClick={() => onGenerate(scope, config)} disabled={disabled} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50">
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {generating ? 'Generating…' : 'Send to AI'}
             </button>
@@ -1065,6 +1124,14 @@ function PericopeResearchConfigModal({
       </div>
     </div>
   )
+}
+
+function NumberField({ label, value, onChange, min, max, step = 1 }: { label: string; value: number; onChange: (value: number) => void; min: number; max: number; step?: number }) {
+  return <label className="flex flex-col gap-1 text-[11px] text-slate-500"><span className="font-medium text-slate-600">{label}</span><input type="number" value={value} min={min} max={max} step={step} onChange={(e) => onChange(Number(e.target.value))} className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300" /></label>
+}
+
+function OverwriteResearchModal({ onClose, onConfirm, generating }: { onClose: () => void; onConfirm: () => void; generating: boolean }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden"><div className="px-6 py-4 border-b border-slate-100"><h2 className="text-sm font-semibold text-slate-900">Overwrite existing research?</h2><p className="text-xs text-slate-400 mt-0.5">This will delete the stored AI research in the selected scope before generating again.</p></div><div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3"><button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">No, go back</button><button onClick={onConfirm} disabled={generating} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50">{generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{generating ? 'Working…' : 'Yes, overwrite'}</button></div></div></div>
 }
 
 function PericopePromptPreviewModal({

@@ -9,9 +9,12 @@ import {
   type PericopeSection,
   generateLessonSummary,
   buildCopyablePrompt,
+  buildCopyableVerseInsightsPrompt,
   splitStudyNotes,
   AIError,
 } from '@/lib/ai/service'
+import type { VerseInsightPromptConfig, VerseInsightDepth } from '@/lib/ai/types'
+import { buildBatchPrompt, CATEGORY_BATCHES } from '@/lib/ai/prompts/verse-insights'
 import { getUserTradition } from '@/lib/research'
 import { getFlatRenderOrder } from '@/lib/outline'
 import type { OutlineBlock, VerseNote } from '@/types/database'
@@ -232,7 +235,7 @@ export async function reorderVerseNotesAction(
   )
 
   const results = await Promise.all(updates)
-  const failed = results.find(r => r.error)
+  const failed = results.find((result: { error: { message: string } | null }) => result.error)
   return { error: failed?.error?.message ?? null }
 }
 
@@ -270,11 +273,8 @@ export async function incrementNoteUsageAction(
 export async function generateVerseInsightsAction(
   sessionId: string,
   churchId: string,
-  options?: {
-    selectedWords?: Record<string, string[]>   // verse_ref → words chosen by teacher
-    selectedVerseRefs?: string[]
-    researchDepth?: ResearchDepth
-  }
+  selectedWords?: Record<string, string[]>,
+  config?: VerseInsightPromptConfig
 ): Promise<{ error: string | null; count: number }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh.', count: 0 }
@@ -292,15 +292,10 @@ export async function generateVerseInsightsAction(
 
     const verses = await fetchPassage(session.scripture_ref)
     if (verses.length === 0) return { error: 'Could not load scripture text.', count: 0 }
-
-    const requestedVerseRefs = (options?.selectedVerseRefs ?? []).filter(Boolean)
-    const filteredVerses = requestedVerseRefs.length
-      ? verses.filter(v => requestedVerseRefs.includes(v.verse_ref))
+    const scopedVerses = config?.scope === 'selected_verses' && (config?.verseRefs?.length ?? 0) > 0
+      ? verses.filter(v => config?.verseRefs?.includes(v.verse_ref))
       : verses
-
-    if (filteredVerses.length === 0) {
-      return { error: 'Choose at least one verse to research.', count: 0 }
-    }
+    if (scopedVerses.length === 0) return { error: 'No verses selected.', count: 0 }
 
     // Load pastor's notes to send as context for more relevant insights
     const { data: noteRows } = await supabaseAdmin
@@ -318,22 +313,14 @@ export async function generateVerseInsightsAction(
 
     const tradition = await getUserTradition(user.id)
 
-    const selectedWords = options?.selectedWords ?? {}
-    const filteredNotesContext = requestedVerseRefs.length
-      ? Object.fromEntries(Object.entries(notesContext).filter(([verseRef]) => requestedVerseRefs.includes(verseRef)))
-      : notesContext
-    const filteredSelectedWords = requestedVerseRefs.length
-      ? Object.fromEntries(Object.entries(selectedWords).filter(([verseRef]) => requestedVerseRefs.includes(verseRef)))
-      : selectedWords
-
     const result = await generateVerseInsights(user.id, {
-      verses: filteredVerses,
+      verses: scopedVerses,
       sessionTitle: session.title,
       sessionType: session.type,
       tradition,
-      pastorNotes: filteredNotesContext,
-      selectedWords: filteredSelectedWords,
-      researchDepth: options?.researchDepth ?? 'quick',
+      pastorNotes: notesContext,
+      selectedWords: selectedWords ?? {},
+      config,
     })
 
     // Save ALL rows before returning — never show without persisting
@@ -347,7 +334,7 @@ export async function generateVerseInsightsAction(
       insight.category === 'word_study'
         ? filterWordStudyItems(
         dedupeInsightItems(insight.items ?? []),
-        filteredSelectedWords?.[insight.verse_ref] ?? []
+        selectedWords?.[insight.verse_ref] ?? []
         )
         : dedupeInsightItems(insight.items ?? []),
       model: result.model,
@@ -369,6 +356,56 @@ export async function generateVerseInsightsAction(
     if (err instanceof AIError) return { error: err.message, count: 0 }
     return { error: err instanceof Error ? err.message : 'Generation failed', count: 0 }
   }
+}
+
+export async function getVerseInsightsPromptAction(
+  sessionId: string,
+  selectedWords?: Record<string, string[]>,
+  config?: VerseInsightPromptConfig
+): Promise<{ prompt: string | null; error: string | null }> {
+  const user = await getActionUser()
+  if (!user) return { prompt: null, error: 'Session expired — please refresh.' }
+
+  const { data: session } = await supabaseAdmin
+    .from('teaching_sessions')
+    .select('title, type, scripture_ref')
+    .eq('id', sessionId)
+    .eq('teacher_id', user.id)
+    .single()
+
+  if (!session) return { prompt: null, error: 'Session not found.' }
+  if (!session.scripture_ref) return { prompt: null, error: 'No scripture reference set on this session.' }
+
+  const verses = await fetchPassage(session.scripture_ref)
+  const scopedVerses = config?.scope === 'selected_verses' && (config?.verseRefs?.length ?? 0) > 0
+    ? verses.filter(v => config?.verseRefs?.includes(v.verse_ref))
+    : verses
+
+  const { data: noteRows } = await supabaseAdmin
+    .from('verse_notes')
+    .select('verse_ref, content')
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .order('position')
+
+  const notesContext: Record<string, string[]> = {}
+  for (const row of noteRows ?? []) {
+    if (!notesContext[row.verse_ref]) notesContext[row.verse_ref] = []
+    notesContext[row.verse_ref].push(row.content)
+  }
+
+  const tradition = await getUserTradition(user.id)
+  const prompt = buildCopyableVerseInsightsPrompt({
+    verses: scopedVerses,
+    sessionTitle: session.title,
+    sessionType: session.type,
+    tradition,
+    pastorNotes: notesContext,
+    selectedWords: selectedWords ?? {},
+    config,
+  })
+
+  return { prompt, error: null }
 }
 
 // ── generateLessonSummaryAction ────────────────────────────────────────────────
@@ -561,6 +598,94 @@ export async function incrementInsightUsedCountAction(
   return { error: updateError?.message ?? null }
 }
 
+export async function clearVerseInsightsAction(
+  sessionId: string,
+  verseRefs: string[]
+): Promise<{ error: string | null; count: number }> {
+  const user = await getActionUser()
+  if (!user) return { error: 'Session expired — please refresh.', count: 0 }
+  if (!verseRefs.length) return { error: null, count: 0 }
+
+  const { data, error } = await supabaseAdmin
+    .from('verse_insights')
+    .delete()
+    .eq('session_id', sessionId)
+    .eq('teacher_id', user.id)
+    .in('verse_ref', verseRefs)
+    .select('verse_ref')
+
+  return { error: error?.message ?? null, count: data?.length ?? 0 }
+}
+
+export async function getPericopeInsightsPromptAction(
+  sessionId: string,
+  sections: PericopeSection[],
+  selectedWordsBySection?: Record<string, string[]>,
+  config?: VerseInsightPromptConfig
+): Promise<{ humanPrompt: string | null; llmPrompt: string | null; error: string | null }> {
+  const user = await getActionUser()
+  if (!user) return { humanPrompt: null, llmPrompt: null, error: 'Session expired — please refresh.' }
+
+  const { data: session } = await supabaseAdmin
+    .from('teaching_sessions')
+    .select('title, type')
+    .eq('id', sessionId)
+    .eq('teacher_id', user.id)
+    .single()
+
+  if (!session) return { humanPrompt: null, llmPrompt: null, error: 'Session not found.' }
+  if (!sections.length) return { humanPrompt: null, llmPrompt: null, error: 'No sections provided.' }
+
+  const tradition = await getUserTradition(user.id)
+
+  const rendered = sections.map((section, sectionIndex) => {
+    const pericopeKey = `pericope:${section.startVerse}`
+    const selectedWords = (selectedWordsBySection?.[pericopeKey] ?? []).slice(0, 5)
+    const combinedVerseData: VerseData = {
+      verse_ref: pericopeKey,
+      verse_num: 1,
+      text: section.verses.map(v => `[${v.verse_ref}] ${v.text}`).join(' '),
+    }
+
+    const promptInput = {
+      verses: [combinedVerseData],
+      sessionTitle: session.title,
+      sessionType: session.type,
+      tradition,
+      selectedWords: selectedWords.length ? { [pericopeKey]: selectedWords } : {},
+      config,
+    }
+
+    const human = [
+      `SECTION ${sectionIndex + 1}: ${section.label}`,
+      '',
+      buildCopyableVerseInsightsPrompt(promptInput),
+    ].join('\n')
+
+    const llm = CATEGORY_BATCHES.map((batch, batchIndex) => {
+      const prompt = buildBatchPrompt(promptInput, batch)
+      return [
+        `SECTION ${sectionIndex + 1}: ${section.label}`,
+        `BATCH ${batchIndex + 1}: ${batch.join(', ')}`,
+        '',
+        'SYSTEM',
+        prompt.system,
+        '',
+        'USER',
+        prompt.user,
+      ].join('\n')
+    }).join('\n\n------------------------------\n\n')
+
+    return { human, llm }
+  })
+
+  return {
+    humanPrompt: rendered.map(r => r.human).join('\n\n==============================\n\n'),
+    llmPrompt: rendered.map(r => r.llm).join('\n\n==============================\n\n'),
+    error: null,
+  }
+}
+
 // ── generatePericopeInsightsAction ───────────────────────────────────────────
 // Generates insights for a single pericope section.
 // Uses section label as verse_ref key — coexists with per-verse data.
@@ -570,7 +695,7 @@ export async function generatePericopeInsightsAction(
   churchId: string,
   section: PericopeSection,
   selectedWords: string[] = [],
-  researchDepth: ResearchDepth = 'quick',
+  config?: VerseInsightPromptConfig | VerseInsightDepth,
 ): Promise<{
   error: string | null
   sectionKey?: string
@@ -596,6 +721,10 @@ export async function generatePericopeInsightsAction(
 
     const tradition = await getUserTradition(user.id)
     const sectionKey = `pericope:${section.startVerse}`
+    const resolvedConfig: VerseInsightPromptConfig =
+      typeof config === 'string'
+        ? { depth: config }
+        : (config ?? { depth: 'quick' })
 
     const result = await generatePericopeInsights(user.id, {
       section: {
@@ -606,7 +735,7 @@ export async function generatePericopeInsightsAction(
       sessionType: session.type,
       tradition,
       selectedWords,
-      researchDepth,
+      config: resolvedConfig,
     })
 
     const generatedAt = new Date().toISOString()
@@ -813,14 +942,14 @@ export async function splitVerseNotesAction(
   if (loadError) return { verseNotes: {}, error: loadError.message }
   if (!notes?.length) return { verseNotes: {}, error: 'Selected notes were not found.' }
 
-  const byVerse = new Set(notes.map(n => n.verse_ref))
+  const byVerse = new Set(notes.map((note: VerseNote) => note.verse_ref))
   if (byVerse.size !== 1) return { verseNotes: {}, error: 'Split notes one section at a time.' }
 
   let cards: { sourceId: string; content: string; category: string }[] = []
 
   try {
     const result = await splitStudyNotes(user.id, {
-      notes: notes.map(n => ({ id: n.id, content: n.content }))
+      notes: notes.map((note: VerseNote) => ({ id: note.id, content: note.content }))
     })
     cards = result.cards
   } catch {

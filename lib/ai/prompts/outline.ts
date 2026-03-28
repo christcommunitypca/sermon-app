@@ -8,10 +8,11 @@ import {
   renderOutlinePromptForLLM,
 } from '@/lib/outlinePrompt'
 
-export const VERSION = 'v1.1'
+export const VERSION = 'v1.2'
 
 export function buildPrompt(input: OutlineInput): PromptPayload {
   const { session, thoughts, selectedFlow } = input
+  const effectiveConfig = input.config ?? (session.researchDepth ? { depth: session.researchDepth } : undefined)
 
   const parts = buildOutlinePromptParts({
     selectedFlow,
@@ -19,7 +20,7 @@ export function buildPrompt(input: OutlineInput): PromptPayload {
     verseNotesForAI: input.verseNotes,
     thoughts,
     sessionEstimatedDuration: session.estimatedDuration,
-    researchDepth: input.researchDepth,
+    config: effectiveConfig,
   })
 
   return renderOutlinePromptForLLM({
@@ -29,6 +30,7 @@ export function buildPrompt(input: OutlineInput): PromptPayload {
       scriptureRef: session.scriptureRef,
       notes: session.notes,
       estimatedDuration: session.estimatedDuration,
+      researchDepth: effectiveConfig?.depth ?? session.researchDepth,
     },
     parts,
     version: VERSION,

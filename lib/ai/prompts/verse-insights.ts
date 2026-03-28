@@ -10,7 +10,7 @@
 // Cost target: ~$0.04 for a 9-verse passage on Sonnet.
 
 import type { PromptPayload } from '@/lib/ai/types'
-import type { VerseInsightInput } from '@/lib/ai/types'
+import type { VerseInsightInput, VerseInsightCustomSettings, VerseInsightDepth } from '@/lib/ai/types'
 
 export const VERSION = 'v1.5'
 
@@ -25,6 +25,41 @@ export const CATEGORIES = [
 ] as const
 
 export type InsightCategory = typeof CATEGORIES[number]
+
+const QUICK_SETTINGS: VerseInsightCustomSettings = {
+  itemsPerCategory: 2,
+  sentencesPerItemMin: 1,
+  sentencesPerItemMax: 2,
+  crossRefsPerItemMin: 1,
+  crossRefsPerItemMax: 1,
+  maxWordsPerCategory: 120,
+}
+
+const DEEP_SETTINGS: VerseInsightCustomSettings = {
+  itemsPerCategory: 4,
+  sentencesPerItemMin: 3,
+  sentencesPerItemMax: 5,
+  crossRefsPerItemMin: 2,
+  crossRefsPerItemMax: 4,
+  maxWordsPerCategory: 300,
+}
+
+function resolveSettings(depth: VerseInsightDepth | undefined, customSettings?: VerseInsightCustomSettings | null): VerseInsightCustomSettings {
+  if (depth === 'custom' && customSettings) return customSettings
+  if (depth === 'deep') return DEEP_SETTINGS
+  return QUICK_SETTINGS
+}
+
+function buildDepthRules(depth: VerseInsightDepth | undefined, customSettings?: VerseInsightCustomSettings | null) {
+  const settings = resolveSettings(depth, customSettings)
+  return [
+    `- Return exactly ${settings.itemsPerCategory} items for each verse/category object unless the text clearly cannot support that many.`,
+    `- Write ${settings.sentencesPerItemMin}-${settings.sentencesPerItemMax} sentences for each item.`,
+    `- When a category uses supporting Bible references, include ${settings.crossRefsPerItemMin}-${settings.crossRefsPerItemMax} supporting references per item when the text supports them.`,
+    `- Keep the full response for each verse/category object under approximately ${settings.maxWordsPerCategory} words.`,
+  ].join('\n')
+}
+
 
 // Two batches — each covers 3 categories, run in parallel
 export const CATEGORY_BATCHES: InsightCategory[][] = [
@@ -72,8 +107,7 @@ export function buildBatchPrompt(
   categories: InsightCategory[]
 ): PromptPayload {
   const { verses, sessionTitle, sessionType, tradition } = input
-  const researchDepth = input.researchDepth ?? 'quick'
-  const isDeepDive = researchDepth === 'deep'
+  const depthRules = buildDepthRules(input.config?.depth, input.config?.customSettings)
 
   const passageText = verses
     .map(v => {
@@ -108,14 +142,6 @@ export function buildBatchPrompt(
     `"${cat}": ${CATEGORY_DESCRIPTIONS[cat]}`
   ).join('\n')
 
-  const itemLimit = isDeepDive ? 4 : 2
-  const contentRule = isDeepDive
-    ? 'Keep content substantive but still scannable: 2-4 sentences where needed.'
-    : 'Keep content brief: 1 short sentence, 2 only if needed.'
-  const depthRule = isDeepDive
-    ? '- Depth mode: Deep Dive. Give fuller explanation, stronger detail, and more useful specifics in each item.\n- Where relevant, include more than the most obvious cross-reference or application.'
-    : '- Depth mode: Quick Scan. Be concise, selective, and high value.'
-
   const verseRefs = verses.map(v => v.verse_ref).join(', ')
 
   const system = `You are a biblical studies assistant helping a pastor prepare to teach.
@@ -144,12 +170,14 @@ Response — a JSON array, no markdown, no preamble:
 // - Verses: ${verseRefs}
 // - Categories and what they mean:
 // ${categorySpec}
-// - items: MAX 3 per object. 1-2 sentences per item. Concise and specific.
-// - Cross-verse reasoning encouraged — insights may reference other verses in the passage.
+// // - Cross-verse reasoning encouraged — insights may reference other verses in the passage.
 // - Teacher's tradition: ${tradition}. Weight application and theology_by_tradition accordingly.
 // - For quotes, context, and theology/history claims, include source_label and source_url when you know a reliable direct source.
 // - If you are unsure of a source, omit source_label and source_url rather than guessing.
 // - Never fabricate quotes, citations, or URLs.
+
+Research-output rules:
+${depthRules}
 
 Rules:
 - Return ONLY the JSON array.
@@ -157,20 +185,19 @@ Rules:
 - Verses: ${verseRefs}
 - Categories:
 ${categorySpec}
-- items: MAX ${itemLimit} per object.\n- ${contentRule}\n- No filler. No repeated ideas across categories.
+- No filler. No repeated ideas across categories.
 - Cross-verse reasoning allowed.
 - Teacher tradition: ${tradition}. Weight application and theology_by_tradition accordingly.
-- ${wordStudyInstruction}\n${depthRule}\n- Include source_label and source_url only when you know a reliable source.
+- ${wordStudyInstruction}
+- Include source_label and source_url only when you know a reliable source.
 - If unsure, omit source_label and source_url.
 - Never fabricate quotes, citations, or URLs.`
 
 
 
-const user = `Passage: ${sessionTitle} (${sessionType})
+const scopeLabel = input.config?.scope === 'selected_verses' ? `Selected verses only: ${(input.config?.verseRefs ?? verses.map(v => v.verse_ref)).join(', ')}` : 'All verses in the passage'
 
-${passageText}
-
-Generate ${categories.join(', ')} in ${isDeepDive ? 'Deep Dive' : 'Quick Scan'} mode. JSON only.`
+  const user = `Passage: ${sessionTitle} (${sessionType})\nScope: ${scopeLabel}\n\n${passageText}\n\nGenerate ${categories.join(', ')}. JSON only.`
 
   return { system, user, version: VERSION, temperature: 0.3 }
 }
@@ -182,4 +209,12 @@ export function buildCategoryPrompt(input: VerseInsightInput, category: InsightC
 
 export function buildPrompt(input: VerseInsightInput): PromptPayload {
   return buildBatchPrompt(input, CATEGORY_BATCHES[0])
+}
+
+
+export function buildCopyableVerseInsightsPrompt(input: VerseInsightInput) {
+  return CATEGORY_BATCHES.map((batch, idx) => {
+    const prompt = buildBatchPrompt(input, batch)
+    return [`BATCH ${idx + 1}: ${batch.join(', ')}`, '', 'SYSTEM', prompt.system, '', 'USER', prompt.user].join('\n')
+  }).join('\n\n------------------------------\n\n')
 }

@@ -65,13 +65,16 @@ interface Props {
   activeTab?: TopTab
   onActiveTabChange?: (tab: TopTab) => void
   hideTopTabs?: boolean
+  allowedTabs?: TopTab[]
+  scriptureFontSize?: number
+  hideFilters?: boolean
 }
 
 export function OutlineReference({
   verses, insights, verseNotes, hiddenVerses, allVerseRefs, onToggleVerse,
-  pendingItemId, onPendingItem, activeTab: controlledActiveTab, onActiveTabChange, hideTopTabs = false,
+  pendingItemId, onPendingItem, activeTab: controlledActiveTab, onActiveTabChange, hideTopTabs = false, allowedTabs = ['notes', 'scripture', 'ai'], scriptureFontSize = 14, hideFilters = false,
 }: Props) {
-  const [internalActiveTab, setInternalActiveTab] = useState<TopTab>('notes')
+  const [internalActiveTab, setInternalActiveTab] = useState<TopTab>(allowedTabs[0] ?? 'notes')
   const activeTab = controlledActiveTab ?? internalActiveTab
   const setActiveTab = onActiveTabChange ?? setInternalActiveTab
   const [activeCategory, setActiveCategory] = useState<CategoryKey>('word_study')
@@ -103,11 +106,15 @@ export function OutlineReference({
   const hasAI = Object.values(aiCounts).some(Boolean)
 
   useEffect(() => {
+    if (!allowedTabs.includes(activeTab)) {
+      setActiveTab(allowedTabs[0] ?? 'scripture')
+      return
+    }
     if (activeTab === 'ai' && !hasAI) {
-      const fallback: TopTab = notesExist ? 'notes' : 'scripture'
+      const fallback = (notesExist && allowedTabs.includes('notes')) ? 'notes' : (allowedTabs.includes('scripture') ? 'scripture' : allowedTabs[0] ?? 'notes')
       setActiveTab(fallback)
     }
-  }, [activeTab, hasAI, notesExist])
+  }, [activeTab, hasAI, notesExist, allowedTabs, setActiveTab])
 
   useEffect(() => {
     if (aiCounts[activeCategory] > 0) return
@@ -136,7 +143,7 @@ export function OutlineReference({
     return true
   }
 
-  const filtersActive = flagFilter !== 'all' || usedFilter !== 'all' || hiddenVerses.size > 0
+  const filtersActive = !hideFilters && (flagFilter !== 'all' || usedFilter !== 'all' || hiddenVerses.size > 0)
 
   function renderItem(ref: string, catKey: CategoryKey, item: InsightItem, origIdx: number) {
     const pendKey = `${ref}-${catKey}-${origIdx}`
@@ -175,7 +182,7 @@ export function OutlineReference({
           ['notes', 'Notes'],
           ['scripture', 'Scripture'],
           ['ai', 'AI'],
-        ] as [TopTab, string][]).map(([tab, label]) => {
+        ] as [TopTab, string][]).filter(([tab]) => allowedTabs.includes(tab)).map(([tab, label]) => {
           const active = activeTab === tab
           return (
             <button
@@ -188,7 +195,7 @@ export function OutlineReference({
           )
         })}
 
-        <div ref={filterRef} className="relative shrink-0">
+        {!hideFilters && <div ref={filterRef} className="relative shrink-0">
           <button
             onClick={() => setShowFilter(v => !v)}
             className={`flex items-center gap-0.5 px-1.5 py-1 rounded-md text-[11px] font-medium transition-colors ${filtersActive ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
@@ -244,7 +251,7 @@ export function OutlineReference({
               )}
             </div>
           )}
-        </div>
+        </div>}
       </div>}
 
       {activeTab === 'ai' && (
@@ -285,7 +292,7 @@ export function OutlineReference({
                     </button>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-600 leading-relaxed">{verse.text}</p>
+                    <p className="text-slate-600 leading-relaxed" style={{ fontSize: scriptureFontSize }}>{verse.text}</p>
                   </div>
                 </div>
               </div>

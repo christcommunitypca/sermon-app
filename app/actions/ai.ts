@@ -7,8 +7,9 @@ import { getSessionWithOutline, getThoughtsForSession, ensureOutline } from '@/l
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { saveResearchItems } from '@/lib/research'
 import { rebuildSharedStudyInsightsFromResearch } from '@/lib/study-content'
-import type { ResearchCategory } from '@/types/database'
-import type { OutlineSelectedFlow, OutlineResearchDepth } from '@/lib/outlinePrompt'
+import type { ResearchCategory, ThoughtCapture } from '@/types/database'
+import type { OutlinePromptConfig } from '@/lib/ai/types'
+import type { OutlineSelectedFlow } from '@/lib/outlinePrompt'
 
 // ── Generate series plan ────────────────────────────────────────────────────
 export async function generateSeriesAction(input: {
@@ -38,7 +39,8 @@ export async function generateOutlineAction(input: {
   selectedFlow?: OutlineSelectedFlow | null
   verseNotes?: Record<string, string>
   selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
-  researchDepth?: OutlineResearchDepth
+  config?: OutlinePromptConfig
+  researchDepth?: 'quick' | 'deep' | 'custom'
 }) {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' } as any
@@ -48,6 +50,7 @@ export async function generateOutlineAction(input: {
 
   const outline = data.outline ?? await ensureOutline(input.sessionId, input.churchId)
   const thoughts = await getThoughtsForSession(input.sessionId)
+  const outlineConfig = input.config ?? (input.researchDepth ? { depth: input.researchDepth } : undefined)
 
   try {
     const result = await generateOutline(user.id, {
@@ -57,13 +60,14 @@ export async function generateOutlineAction(input: {
         scriptureRef: data.session.scripture_ref,
         notes: data.session.notes,
         estimatedDuration: data.session.estimated_duration,
+        researchDepth: outlineConfig?.depth,
       },
-      thoughts: thoughts.map(t => ({ content: t.content ?? '' })),
+      thoughts: (thoughts as ThoughtCapture[]).map((thought) => ({ content: thought.content ?? '' })),
       selectedFlow: input.selectedFlow,
       outlineId: outline.id,
       verseNotes: input.verseNotes,
       selectedInsights: input.selectedInsights,
-      researchDepth: input.researchDepth,
+      config: outlineConfig,
     })
 
     return { blocks: result.blocks, model: result.model, error: null }

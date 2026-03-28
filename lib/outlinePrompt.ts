@@ -1,3 +1,9 @@
+import type {
+  OutlineCustomSettings,
+  OutlinePromptConfig,
+  OutlineResearchDepth,
+} from '@/lib/ai/types'
+
 export type OutlineSelectedFlowStep = {
   id?: string
   title: string
@@ -20,8 +26,6 @@ export type OutlineSelectedInsight = {
   content: string
 }
 
-export type OutlineResearchDepth = 'quick' | 'deep'
-
 export type OutlinePromptParts = {
   requestRules: string[]
   flowSummaryText: string
@@ -31,7 +35,115 @@ export type OutlinePromptParts = {
   thoughtText: string
   verseNotesText: string
   selectedInsightsText: string
-  depthSummaryText: string
+  scopeLabel: string
+  scopeInstructions: string[]
+  depthLabel: string
+  depthInstructions: string[]
+}
+
+const QUICK_OUTLINE_SETTINGS: OutlineCustomSettings = {
+  mainPointsMin: 2,
+  mainPointsMax: 4,
+  subPointsPerMainPointMin: 1,
+  subPointsPerMainPointMax: 2,
+  applicationBlocksMin: 1,
+  transitionBlocksMin: 1,
+}
+
+const DEEP_OUTLINE_SETTINGS: OutlineCustomSettings = {
+  mainPointsMin: 3,
+  mainPointsMax: 5,
+  subPointsPerMainPointMin: 2,
+  subPointsPerMainPointMax: 4,
+  applicationBlocksMin: 2,
+  transitionBlocksMin: 1,
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function normalizeOutlineCustomSettings(
+  value?: OutlineCustomSettings | null
+): OutlineCustomSettings {
+  const mainPointsMin = clamp(Number(value?.mainPointsMin ?? QUICK_OUTLINE_SETTINGS.mainPointsMin), 1, 8)
+  const mainPointsMax = clamp(Number(value?.mainPointsMax ?? QUICK_OUTLINE_SETTINGS.mainPointsMax), mainPointsMin, 10)
+  const subPointsPerMainPointMin = clamp(Number(value?.subPointsPerMainPointMin ?? QUICK_OUTLINE_SETTINGS.subPointsPerMainPointMin), 1, 6)
+  const subPointsPerMainPointMax = clamp(Number(value?.subPointsPerMainPointMax ?? QUICK_OUTLINE_SETTINGS.subPointsPerMainPointMax), subPointsPerMainPointMin, 8)
+  const applicationBlocksMin = clamp(Number(value?.applicationBlocksMin ?? QUICK_OUTLINE_SETTINGS.applicationBlocksMin), 1, 6)
+  const transitionBlocksMin = clamp(Number(value?.transitionBlocksMin ?? QUICK_OUTLINE_SETTINGS.transitionBlocksMin), 1, 6)
+
+  return {
+    mainPointsMin,
+    mainPointsMax,
+    subPointsPerMainPointMin,
+    subPointsPerMainPointMax,
+    applicationBlocksMin,
+    transitionBlocksMin,
+  }
+}
+
+function resolveOutlineSettings(
+  depth: OutlineResearchDepth | undefined,
+  customSettings?: OutlineCustomSettings | null
+): OutlineCustomSettings {
+  if (depth === 'custom' && customSettings) return normalizeOutlineCustomSettings(customSettings)
+  if (depth === 'deep') return DEEP_OUTLINE_SETTINGS
+  return QUICK_OUTLINE_SETTINGS
+}
+
+function buildScopeInstructions(config?: OutlinePromptConfig | null) {
+  if (config?.scope === 'selected_verses' && (config.verseRefs?.length ?? 0) > 0) {
+    return {
+      scopeLabel: 'Selected Verses',
+      scopeInstructions: [
+        '- Scope mode: Selected verses only.',
+        `- Primary verses for outline development: ${(config.verseRefs ?? []).join(', ')}.`,
+        '- Keep the outline centered on this selected set. Any verse outside it should only appear as a brief supporting reference if truly needed.',
+      ],
+    }
+  }
+
+  return {
+    scopeLabel: 'All Verses',
+    scopeInstructions: [
+      '- Scope mode: All verses in the current passage context may be used for outline development.',
+    ],
+  }
+}
+
+function buildDepthInstructions(
+  depth: OutlineResearchDepth | undefined,
+  customSettings?: OutlineCustomSettings | null
+) {
+  const settings = resolveOutlineSettings(depth, customSettings)
+  const label =
+    depth === 'deep'
+      ? 'Deep Dive'
+      : depth === 'custom'
+        ? 'Custom'
+        : 'Quick Scan'
+
+  const modeLine =
+    depth === 'deep'
+      ? '- Depth mode: Deep Dive.'
+      : depth === 'custom'
+        ? '- Depth mode: Custom.'
+        : '- Depth mode: Quick Scan.'
+
+  const instructions = [
+    modeLine,
+    `- Aim for ${settings.mainPointsMin}-${settings.mainPointsMax} main points when the text supports that range.`,
+    `- Give most main points ${settings.subPointsPerMainPointMin}-${settings.subPointsPerMainPointMax} sub-points when the text supports that range.`,
+    `- Include at least ${settings.applicationBlocksMin} application block${settings.applicationBlocksMin === 1 ? '' : 's'} when the text supports them.`,
+    `- Include at least ${settings.transitionBlocksMin} transition block${settings.transitionBlocksMin === 1 ? '' : 's'} when the flow benefits from them.`,
+    '- Fit the final outline to the target duration rather than padding it beyond the time limit.',
+  ]
+
+  return {
+    depthLabel: label,
+    depthInstructions: instructions,
+  }
 }
 
 export function buildOutlinePromptParts(args: {
@@ -40,6 +152,7 @@ export function buildOutlinePromptParts(args: {
   verseNotesForAI?: Record<string, string>
   thoughts?: Array<{ content?: string | null }>
   sessionEstimatedDuration?: number | null
+  config?: OutlinePromptConfig | null
   researchDepth?: OutlineResearchDepth
 }): OutlinePromptParts {
   const thoughtText =
@@ -49,6 +162,13 @@ export function buildOutlinePromptParts(args: {
       .join('\n') || 'None provided.'
 
   const selectedFlow = args.selectedFlow ?? null
+  const effectiveConfig = args.config ?? (args.researchDepth ? { depth: args.researchDepth } : null)
+
+  const { scopeLabel, scopeInstructions } = buildScopeInstructions(effectiveConfig)
+  const { depthLabel, depthInstructions } = buildDepthInstructions(
+    effectiveConfig?.depth ?? args.researchDepth,
+    effectiveConfig?.customSettings ?? null
+  )
 
   const flowSummaryText =
     selectedFlow?.steps?.length
@@ -98,20 +218,6 @@ export function buildOutlinePromptParts(args: {
         .join('\n')
     : ''
 
-  const researchDepth = args.researchDepth ?? 'quick'
-  const depthSummaryText = researchDepth === 'deep'
-    ? [
-        'Research depth: Deep Dive.',
-        'Use the pastor\'s notes and selected research to produce fuller, more developed outline material.',
-        'Give more complete sub-points, clearer transitions, stronger explanatory development, and richer applications where appropriate.',
-        'Aim for a more expansive and detailed outline than Quick Scan while still remaining an outline, not a manuscript.',
-      ].join(' ')
-    : [
-        'Research depth: Quick Scan.',
-        'Produce a tighter, lighter outline with concise points, fewer supporting layers, and shorter development.',
-        'Prefer clarity and speed over breadth while still giving a faithful preaching structure.',
-      ].join(' ')
-
   return {
     requestRules: [
       'Return ONLY a JSON array of blocks, no markdown, no explanation.',
@@ -126,6 +232,8 @@ export function buildOutlinePromptParts(args: {
       '- low = suggestion needing pastor review',
       '- Respect the selected sermon flow when one is provided, but adapt naturally to the text rather than forcing awkward sections.',
       '- Let the biblical text control the content, while the selected flow controls the movement and ordering.',
+      ...scopeInstructions,
+      ...depthInstructions,
     ],
     flowSummaryText,
     flowDetailText,
@@ -134,7 +242,10 @@ export function buildOutlinePromptParts(args: {
     thoughtText,
     verseNotesText,
     selectedInsightsText,
-    depthSummaryText,
+    scopeLabel,
+    scopeInstructions,
+    depthLabel,
+    depthInstructions,
   }
 }
 
@@ -145,6 +256,7 @@ export function renderOutlinePromptForLLM(args: {
     scriptureRef?: string | null
     notes?: string | null
     estimatedDuration?: number | null
+    researchDepth?: OutlineResearchDepth
   }
   parts: OutlinePromptParts
   version: string
@@ -157,7 +269,8 @@ Rules:
 ${parts.requestRules.join('\n')}
 - ${parts.flowSummaryText}
 ${parts.durationRule}
-- ${parts.depthSummaryText}`
+${parts.scopeInstructions.join('\n')}
+${parts.depthInstructions.join('\n')}`
 
   const user = `Create a preaching outline for:
 
@@ -165,6 +278,8 @@ Title: ${session.title}
 Type: ${session.type}
 Scripture: ${session.scriptureRef ?? 'Not specified'}
 ${parts.durationUser}
+Outline scope: ${parts.scopeLabel}
+Outline depth: ${session.researchDepth ? (session.researchDepth === 'deep' ? 'Deep Dive' : session.researchDepth === 'custom' ? 'Custom' : 'Quick Scan') : parts.depthLabel}
 Notes: ${session.notes ?? 'None'}
 
 Selected sermon flow:
@@ -196,6 +311,7 @@ export function renderOutlinePromptForHuman(args: {
     scriptureRef?: string | null
     notes?: string | null
     estimatedDuration?: number | null
+    researchDepth?: OutlineResearchDepth
   }
   parts: OutlinePromptParts
   version?: string
@@ -263,6 +379,8 @@ function formatPromptText(text: string): string[] {
       line.startsWith('Type:') ||
       line.startsWith('Scripture:') ||
       line.startsWith('Target delivery time:') ||
+      line.startsWith('Outline scope:') ||
+      line.startsWith('Outline depth:') ||
       line.startsWith('Notes:')
     ) {
       out.push(`- ${line}`)

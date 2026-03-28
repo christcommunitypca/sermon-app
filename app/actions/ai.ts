@@ -8,7 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { saveResearchItems } from '@/lib/research'
 import { rebuildSharedStudyInsightsFromResearch } from '@/lib/study-content'
 import type { ResearchCategory } from '@/types/database'
-import type { OutlineSelectedFlow } from '@/lib/outlinePrompt'
+import type { OutlineSelectedFlow, OutlineResearchDepth } from '@/lib/outlinePrompt'
 
 // ── Generate series plan ────────────────────────────────────────────────────
 export async function generateSeriesAction(input: {
@@ -38,6 +38,7 @@ export async function generateOutlineAction(input: {
   selectedFlow?: OutlineSelectedFlow | null
   verseNotes?: Record<string, string>
   selectedInsights?: { verseRef: string; category: string; title: string; content: string }[]
+  researchDepth?: OutlineResearchDepth
 }) {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh the page.' } as any
@@ -62,6 +63,7 @@ export async function generateOutlineAction(input: {
       outlineId: outline.id,
       verseNotes: input.verseNotes,
       selectedInsights: input.selectedInsights,
+      researchDepth: input.researchDepth,
     })
 
     return { blocks: result.blocks, model: result.model, error: null }

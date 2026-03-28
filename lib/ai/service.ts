@@ -54,6 +54,7 @@ import type {
   VerseInsightInput,
   VerseInsightResult,
   RawVerseInsight,
+  ResearchDepth,
   LessonSummaryInput,
   LessonSummaryResult,
   ProviderName,
@@ -422,6 +423,8 @@ export async function generateVerseInsights(
     return generateVerseInsightsSplit(userId, input, creds, provider)
   }
 
+  const maxItemsPerCategory = input.researchDepth === 'deep' ? 4 : 2
+
   const batchResults = await Promise.allSettled(
     VerseInsightsPrompt.CATEGORY_BATCHES.map(async (categories, batchIndex) => {
       const prompt = VerseInsightsPrompt.buildBatchPrompt(input, categories)
@@ -442,7 +445,7 @@ export async function generateVerseInsights(
         .map(item => ({
           verse_ref: item.verse_ref as string,
           category: item.category as string,
-            items: (item.items ?? []).slice(0, 2).map(i => ({
+            items: (item.items ?? []).slice(0, maxItemsPerCategory).map(i => ({
             title: i.title ?? '',
             content: i.content ?? '',
           })),
@@ -501,6 +504,8 @@ async function generateVerseInsightsSplit(
     items?: { title?: string; content?: string; source_label?: string; source_url?: string }[]
   }
 
+  const maxItemsPerCategory = input.researchDepth === 'deep' ? 4 : 2
+
   // Build all tasks: each verse × each batch = verses.length × 2 calls
   // Run with concurrency limit of 4 to avoid rate limits
   const tasks: { verse: typeof input.verses[0]; categories: InsightCategory[]; batchIdx: number }[] = []
@@ -532,7 +537,7 @@ async function generateVerseInsightsSplit(
       }
       const prompt = VerseInsightsPrompt.buildBatchPrompt(singleVerseInput, task.categories)
       // Single verse needs far fewer tokens
-      const cappedPrompt = { ...prompt, maxTokens: 1200 }
+      const cappedPrompt = { ...prompt, maxTokens: input.researchDepth === 'deep' ? 2200 : 1200 }
       const completion = await provider.complete(cappedPrompt, creds)
 
       if (!Array.isArray(completion.parsed)) {
@@ -553,7 +558,7 @@ async function generateVerseInsightsSplit(
 .map(item => ({
   verse_ref: item.verse_ref as string,
   category: item.category as string,
-  items: (item.items ?? []).slice(0, 2).map(i => ({
+  items: (item.items ?? []).slice(0, maxItemsPerCategory).map(i => ({
     title: i.title ?? '',
     content: i.content ?? '',
     source_label: i.source_label ?? undefined,
@@ -648,10 +653,12 @@ export async function generatePericopeInsights(
     tradition: string
     pastorNotes?: string[]
     selectedWords?: string[]
+    researchDepth?: ResearchDepth
   }
 ): Promise<VerseInsightResult> {
   const creds = await resolveCredentials(userId)
   const provider = getProvider()
+  const maxItemsPerCategory = input.researchDepth === 'deep' ? 4 : 2
 
   const pericopeKey = `pericope:${input.section.startVerse}`
   const chosenWords = input.selectedWords?.length
@@ -672,9 +679,10 @@ export async function generatePericopeInsights(
     pastorNotes: input.pastorNotes?.length
       ? { [pericopeKey]: input.pastorNotes }
       : {},
-      selectedWords: input.selectedWords?.length
-  ? { [pericopeKey]: input.selectedWords }
-  : {},
+    selectedWords: input.selectedWords?.length
+      ? { [pericopeKey]: input.selectedWords }
+      : {},
+    researchDepth: input.researchDepth ?? 'quick',
   }
 
   const batchResults = await Promise.allSettled(
@@ -702,7 +710,7 @@ export async function generatePericopeInsights(
         .map(item => ({
           verse_ref: item.verse_ref as string,
           category: item.category as string,
-          items: (item.items ?? []).slice(0, 2).map(i => ({
+          items: (item.items ?? []).slice(0, maxItemsPerCategory).map(i => ({
             title: i.title ?? '',
             content: i.content ?? '',
             source_label: i.source_label ?? undefined,

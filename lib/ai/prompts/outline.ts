@@ -19,6 +19,7 @@ export function buildPrompt(input: OutlineInput): PromptPayload {
     verseNotesForAI: input.verseNotes,
     thoughts,
     sessionEstimatedDuration: session.estimatedDuration,
+    researchDepth: input.researchDepth,
   })
 
   return renderOutlinePromptForLLM({

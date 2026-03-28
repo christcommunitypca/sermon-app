@@ -5,27 +5,31 @@ import { SessionForm } from '@/components/teaching/SessionForm'
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getEnabledChurchLessonTypes } from '@/lib/lesson-types'
+import { listAccessibleFlows } from '@/lib/flow-library'
 
 interface Props { params: { churchSlug: string } }
 
 export default async function NewSessionPage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
   if (!session) redirect('/sign-in')
   const user = session.user
 
   const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
   if (!church) return notFound()
 
-  const [flowsResult, lessonTypes] = await Promise.all([
-    supabaseAdmin.from('flows').select('*').eq('church_id', church.id).eq('teacher_id', user.id).order('name'),
+  const [flows, lessonTypes] = await Promise.all([
+    listAccessibleFlows(church.id, user.id),
     getEnabledChurchLessonTypes(church.id),
   ])
 
-  const flows = flowsResult.data ?? []
   const firstType = lessonTypes[0]
-  const defaultFlowId = firstType?.default_flow_id ?? undefined
+  const defaultFlowId = firstType?.default_flow_id && flows.some(flow => flow.id === firstType.default_flow_id)
+    ? firstType.default_flow_id
+    : undefined
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
@@ -37,6 +41,7 @@ export default async function NewSessionPage({ params }: Props) {
         <SessionForm
           churchId={church.id}
           churchSlug={churchSlug}
+          currentUserId={user.id}
           flows={flows}
           lessonTypes={lessonTypes}
           selectedFlowId={defaultFlowId}

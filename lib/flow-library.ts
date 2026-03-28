@@ -4,6 +4,12 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import type { Flow, Role, SessionType } from '@/types/database'
 import { groupFlowsForSessionType } from '@/lib/flow-groups'
 
+export type FlowScope = 'personal' | 'church'
+
+export function normalizeFlowScope(scope: unknown): FlowScope {
+  return scope === 'church' ? 'church' : 'personal'
+}
+
 export async function listAccessibleFlows(churchId: string, userId: string) {
   const { data } = await supabaseAdmin
     .from('flows')

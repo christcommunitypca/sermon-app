@@ -109,7 +109,8 @@ export class AnthropicProvider implements AIProvider {
       if (end > start) jsonStr = stripped.slice(start, end + 1)
     }
 
-    let parsed: unknown
+    let parsed: unknown | null = null
+    let parse_error: string | undefined
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
@@ -118,14 +119,13 @@ export class AnthropicProvider implements AIProvider {
       const hint = looksLikeTruncated
         ? ' (response appears truncated — try again or reduce scope)'
         : ''
-      throw new AIError(
-        'malformed_response',
-        `Could not parse AI response as JSON${hint}. Raw: ${jsonStr.slice(0, 300)}`
-      )
+      parse_error = `Could not parse AI response as JSON${hint}. Raw: ${jsonStr.slice(0, 300)}`
     }
 
     return {
+      raw_text: raw,
       parsed,
+      parse_error,
       model: data.model ?? creds.model,
       provider: 'anthropic',
       duration_ms: Date.now() - start,

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { Menu, Plus, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Plus, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { Flow } from '@/types/database'
 
 type Props = {
@@ -11,10 +11,23 @@ type Props = {
   selectedFlowId?: string | null
   createHref: string
   createLabel?: string
+  title?: string
+  description?: string
+  flowHrefSuffix?: string
   children: React.ReactNode
 }
 
-export function FlowLibraryShell({ churchSlug, flows, selectedFlowId, createHref, createLabel = 'Create Flow', children }: Props) {
+export function FlowLibraryShell({
+  churchSlug,
+  flows,
+  selectedFlowId,
+  createHref,
+  createLabel = 'Create Flow',
+  title = 'Flow Library',
+  description = 'Choose an existing flow on the left, or create a new one.',
+  flowHrefSuffix = '',
+  children,
+}: Props) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -24,24 +37,29 @@ export function FlowLibraryShell({ churchSlug, flows, selectedFlowId, createHref
           {open ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Flow Library</h1>
-          <p className="text-sm text-slate-500 mt-1">Choose an existing flow on the left, or create a new one.</p>
+          <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
+          <p className="text-sm text-slate-500 mt-1">{description}</p>
         </div>
       </div>
 
       <div className="grid gap-6" style={{ gridTemplateColumns: open ? '280px minmax(0,1fr)' : 'minmax(0,1fr)' }}>
         {open && (
           <aside className="bg-white border border-slate-200 rounded-2xl p-4 h-fit sticky top-4">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-2">
               <h2 className="text-sm font-semibold text-slate-900">Existing flows</h2>
-              <Link href={createHref} className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900">
+              <Link href={createHref} className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900 whitespace-nowrap">
                 <Plus className="w-4 h-4" />{createLabel}
               </Link>
             </div>
             <div className="space-y-2">
               {flows.map(flow => (
-                <Link key={flow.id} href={`/${churchSlug}/flows/${flow.id}`} className={`block border rounded-xl px-3 py-3 transition-colors ${selectedFlowId === flow.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                  <div className="text-sm font-medium text-slate-900">{flow.name}</div>
+                <Link key={flow.id} href={`/${churchSlug}/flows/${flow.id}${flowHrefSuffix}`} className={`block border rounded-xl px-3 py-3 transition-colors ${selectedFlowId === flow.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-slate-900">{flow.name}</div>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                      {flow.owner_user_id === null ? 'Shared' : 'Personal'}
+                    </span>
+                  </div>
                   {flow.description && <div className="text-xs text-slate-500 mt-1 line-clamp-2">{flow.description}</div>}
                 </Link>
               ))}

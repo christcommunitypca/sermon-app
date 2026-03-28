@@ -1,6 +1,6 @@
 'use client'
 import React, { useState, useCallback, useEffect, useMemo } from 'react'
-import { BookOpen, Save, Sparkles, Share2, NotebookPen } from 'lucide-react'
+import { BookOpen, Save, Sparkles, Share2, NotebookPen, Loader2, X, AlertCircle } from 'lucide-react'
 import { VerseByVersePanel } from './VerseByVersePanel'
 import { ExportModal } from './ExportModal'
 import { updateStudyModeAction } from '@/app/actions/verse-study'
@@ -13,6 +13,7 @@ import {
   renderOutlinePromptForHuman,
   renderOutlinePromptForLLM,
   type OutlineSelectedFlow,
+  type OutlineResearchDepth,
 } from '@/lib/outlinePrompt'
 import { OutlinePanel, DraftOutlineModal, PromptPreviewModal } from './OutlinePanel'
 export interface PendingItem {
@@ -157,7 +158,10 @@ export function TeachingWorkspace({
   const [pericopeSetupComplete, setPericopeSetupComplete] = useState((initialPericopeSetupComplete ?? false) || (initialPericSections?.length ?? 0) > 0)
   const [activeSectionIdx, setActiveSectionIdx] = useState(0)
   const [outlineSectionRefs, setOutlineSectionRefs] = useState<string[] | null>(null)
-  const [outlineReferenceTab, setOutlineReferenceTab] = useState<'notes' | 'ai'>('ai')
+  const [outlineReferenceTab, setOutlineReferenceTab] = useState<'scripture' | 'notes' | 'ai'>('scripture')
+  const [showReplaceOutlineModal, setShowReplaceOutlineModal] = useState(false)
+  const [deletingOutline, setDeletingOutline] = useState(false)
+  const [outlineAiLoading, setOutlineAiLoading] = useState(false)
   const [showDraftOutlineModal, setShowDraftOutlineModal] = useState(false)
   const hasOutline = blocks.length > 0
   const showOutlinePane = hasOutline
@@ -208,6 +212,10 @@ export function TeachingWorkspace({
     }))
   ), [pericSections, verses])
 
+  const sectionVerseRefMap = useMemo(() => (
+    Object.fromEntries(sectionChips.map(chip => [`pericope:${pericSections[chip.idx]?.startVerse ?? ''}`, chip.refs]))
+  ), [sectionChips, pericSections])
+
   useEffect(() => {
     if (activeSectionIdx > Math.max(sectionChips.length - 1, 0)) setActiveSectionIdx(0)
   }, [activeSectionIdx, sectionChips.length])
@@ -237,10 +245,24 @@ export function TeachingWorkspace({
     })
   }
 
-  const handleOutlineGenerated = useCallback((newBlocks: OutlineBlock[]) => {
+  const persistGeneratedOutline = useCallback(async (newBlocks: OutlineBlock[]) => {
     setBlocks(newBlocks)
+
+    try {
+      const { saveBlocksAction } = await import('@/app/(app)/[churchSlug]/teaching/[sessionId]/outline-actions')
+      const result = await saveBlocksAction(outlineId, sessionId, churchId, newBlocks)
+      if (result.error) {
+        console.error('Failed to save generated outline:', result.error)
+      }
+    } catch (error) {
+      console.error('Failed to persist generated outline:', error)
+    }
+  }, [outlineId, sessionId, churchId])
+
+  const handleOutlineGenerated = useCallback((newBlocks: OutlineBlock[]) => {
+    void persistGeneratedOutline(newBlocks)
     openOutline(false)
-  }, [sectionChips.length, activeSectionIdx])
+  }, [persistGeneratedOutline, openOutline])
 
   const handleItemPlaced = useCallback((item: PendingItem) => {
     if (item.sourceKind === 'note') {
@@ -261,9 +283,66 @@ export function TeachingWorkspace({
   const hasBlocks = blocks.length > 0
   const steps = buildSteps(hasVerses, hasNotes, hasResearch, hasBlocks, isPublished)
   const showSectionRail = sectionChips.length > 0 && pericopeMode === 'pericope' && !hasOutline
-  const canTogglePanes = !hasOutline && pericopeMode === 'pericope'
+  const canTogglePanes = !hasOutline
   const lockedStudyMode = initialStudyMode
-  
+
+  function refMatchesSelectedVerses(ref: string, selectedVerseRefs: string[]) {
+    if (!selectedVerseRefs.length) return false
+    if (ref === 'session:shared') return true
+    if (selectedVerseRefs.includes(ref)) return true
+    const mappedRefs = sectionVerseRefMap[ref] ?? []
+    return mappedRefs.some(verseRef => selectedVerseRefs.includes(verseRef))
+  }
+
+  function collectOutlineVerseNotes(scope: 'all_verses' | 'selected_verses', selectedVerseRefs: string[]) {
+    const notesForAI: Record<string, string> = {}
+    for (const [vRef, notes] of Object.entries(verseNotes)) {
+      if (scope === 'selected_verses' && !refMatchesSelectedVerses(vRef, selectedVerseRefs)) continue
+      const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+      if (text) notesForAI[vRef] = text
+    }
+    return notesForAI
+  }
+
+  function collectOutlineInsights(
+    selectedInsights: Array<{ verseRef: string; category: string; title: string; content: string }>,
+    scope: 'all_verses' | 'selected_verses',
+    selectedVerseRefs: string[]
+  ) {
+    if (scope !== 'selected_verses') return selectedInsights
+    return selectedInsights.filter(item => refMatchesSelectedVerses(item.verseRef, selectedVerseRefs))
+  }
+
+  function openGenerateOutlineFlow() {
+    if (hasOutline) {
+      setShowReplaceOutlineModal(true)
+      return
+    }
+    setShowDraftOutlineModal(true)
+  }
+
+  async function handleDeleteOutlineAndContinue() {
+    setDeletingOutline(true)
+    try {
+      const { saveBlocksAction } = await import('@/app/(app)/[churchSlug]/teaching/[sessionId]/outline-actions')
+      const result = await saveBlocksAction(outlineId, sessionId, churchId, [])
+      if (result.error) {
+        console.error('Failed to clear outline:', result.error)
+        return
+      }
+      setBlocks([])
+      setPending(null)
+      setOutlineSectionRefs(null)
+      setOutlineReferenceTab('scripture')
+      setShowReplaceOutlineModal(false)
+      setShowDraftOutlineModal(true)
+    } catch (error) {
+      console.error('Failed to clear outline:', error)
+    } finally {
+      setDeletingOutline(false)
+    }
+  }
+
     return (
     <div className="flex flex-col min-h-0 flex-1">
       <div className={`mb-3 ${focusMode ? 'sticky top-2 z-20 rounded-xl border border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80' : ''}`}>
@@ -290,6 +369,7 @@ export function TeachingWorkspace({
             {showOutlinePane ? (
               <div className="flex items-center gap-1.5 px-1 min-w-max">
                 {([
+                  ['scripture', 'Scripture'],
                   ['ai', 'AI'],
                   ['notes', 'Notes'],
                 ] as const).map(([tab, label]) => (
@@ -333,11 +413,13 @@ export function TeachingWorkspace({
     </button>
 
     <button
-      onClick={() => outlineAIFn.current?.()}
-      className="flex items-center gap-0.5 px-2 py-1.5 text-slate-500 hover:text-violet-700 hover:bg-violet-50 border border-slate-200 hover:border-violet-200 rounded-lg transition-colors text-xs font-medium"
-      title="AI Assistance"
+      onClick={openGenerateOutlineFlow}
+      disabled={deletingOutline}
+      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
+      title="Generate outline"
     >
-      <Sparkles className="w-3.5 h-3.5" />
+      {deletingOutline ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+      {deletingOutline ? 'Deleting…' : 'Generate Outline'}
     </button>
 
     {blocks.length > 0 && (
@@ -375,17 +457,14 @@ export function TeachingWorkspace({
       </div>
     )}
 
-    {!hasOutline && (
-      <button
-       onClick={() => {
-        setShowDraftOutlineModal(true)
-      }}
-      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors"
+    <button
+      onClick={openGenerateOutlineFlow}
+      disabled={deletingOutline}
+      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
     >
-      <Sparkles className="w-3.5 h-3.5" />
-      Generate outline
+      {deletingOutline ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+      {deletingOutline ? 'Deleting…' : 'Generate Outline'}
     </button>
-    )}
   </>
 )}
           </div>
@@ -417,7 +496,7 @@ export function TeachingWorkspace({
     activeSectionVerseRefs={outlineSectionRefs ?? undefined}
     activeReferenceTab={outlineReferenceTab}
     onReferenceTabChange={(tab) => {
-      if (tab === 'notes' || tab === 'ai') setOutlineReferenceTab(tab)
+      if (tab === 'scripture' || tab === 'notes' || tab === 'ai') setOutlineReferenceTab(tab)
     }}
     sessionTitle={sessionTitle}
     sessionType="Sermon"
@@ -463,48 +542,50 @@ export function TeachingWorkspace({
   <DraftOutlineModal
     insights={insights}
     verseNotes={verseNotes}
-    aiLoading={false}
+    availableVerseRefs={verses?.map(v => v.verse_ref) ?? []}
+    aiLoading={outlineAiLoading}
     hasBlocks={blocks.length > 0}
-    onGenerate={(selectedInsights) => {
+    onGenerate={(selectedInsights, options) => {
       setShowDraftOutlineModal(false)
 
-      const notesForAI: Record<string, string> = {}
-      for (const [vRef, notes] of Object.entries(verseNotes)) {
-        const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
-        if (text) notesForAI[vRef] = text
-      }
+      const notesForAI = collectOutlineVerseNotes(options.scope, options.selectedVerseRefs)
+      const filteredInsights = collectOutlineInsights(selectedInsights, options.scope, options.selectedVerseRefs)
 
       outlineAIFn.current = async () => {}
       ;(async () => {
-        const { generateOutlineAction } = await import('@/app/actions/ai')
-        const data = await generateOutlineAction({
-          sessionId,
-          churchId,
-          selectedFlow,
-          verseNotes: notesForAI,
-          selectedInsights,
-        })
+        setOutlineAiLoading(true)
+        try {
+          const { generateOutlineAction } = await import('@/app/actions/ai')
+          const data = await generateOutlineAction({
+            sessionId,
+            churchId,
+            selectedFlow,
+            verseNotes: notesForAI,
+            selectedInsights: filteredInsights,
+            researchDepth: options.depth,
+          })
 
-        if (!data.error && data.blocks) {
-          setBlocks(data.blocks)
-        } else {
-          console.error('Outline generation failed:', data.error)
+          if (!data.error && data.blocks) {
+            await persistGeneratedOutline(data.blocks)
+          } else {
+            console.error('Outline generation failed:', data.error)
+          }
+        } finally {
+          setOutlineAiLoading(false)
         }
       })()
     }}
-    onViewPrompt={(selectedInsights) => {
-      const notesForAI: Record<string, string> = {}
-      for (const [vRef, notes] of Object.entries(verseNotes)) {
-        const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
-        if (text) notesForAI[vRef] = text
-      }
+    onViewPrompt={(selectedInsights, options) => {
+      const notesForAI = collectOutlineVerseNotes(options.scope, options.selectedVerseRefs)
+      const filteredInsights = collectOutlineInsights(selectedInsights, options.scope, options.selectedVerseRefs)
     
       const parts = buildOutlinePromptParts({
         selectedFlow,
-        selectedInsights,
+        selectedInsights: filteredInsights,
         verseNotesForAI: notesForAI,
         thoughts: [],
         sessionEstimatedDuration: estimatedDuration,
+        researchDepth: options.depth,
       })
     
       setHumanPromptPreview(
@@ -520,32 +601,6 @@ export function TeachingWorkspace({
           version: 'preview',
         })
       )
-    
-      // setLlmPromptPreview(
-      //   renderOutlinePromptForLLM({
-      //     session: {
-      //       title: sessionTitle,
-      //       type: 'Sermon',
-      //       scriptureRef: localScriptureRef,
-      //       notes: null,
-      //       estimatedDuration,
-      //     },
-      //     parts,
-      //     version: 'preview',
-      //   }).system +
-      //     '\n\n----- USER -----\n\n' +
-      //     renderOutlinePromptForLLM({
-      //       session: {
-      //         title: sessionTitle,
-      //         type: 'Sermon',
-      //         scriptureRef: localScriptureRef,
-      //         notes: null,
-      //         estimatedDuration,
-      //       },
-      //       parts,
-      //       version: 'preview',
-      //     }).user
-      // )
 
       const llmPrompt = renderOutlinePromptForLLM({
         session: {
@@ -567,6 +622,45 @@ export function TeachingWorkspace({
     }}
     onClose={() => setShowDraftOutlineModal(false)}
   />
+)}
+
+{showReplaceOutlineModal && (
+  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Replace existing outline?</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Generating a new outline will delete the current one first.</p>
+        </div>
+        <button onClick={() => !deletingOutline && setShowReplaceOutlineModal(false)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg disabled:opacity-50" disabled={deletingOutline}>
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="px-6 py-4">
+        <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          Your current outline will be removed before the new outline prompt opens.
+        </div>
+      </div>
+      <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+        <button
+          onClick={() => setShowReplaceOutlineModal(false)}
+          disabled={deletingOutline}
+          className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleDeleteOutlineAndContinue}
+          disabled={deletingOutline}
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          {deletingOutline ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {deletingOutline ? 'Deleting outline…' : 'Delete and continue'}
+        </button>
+      </div>
+    </div>
+  </div>
 )}
 
 {showPromptPreviewModal && (

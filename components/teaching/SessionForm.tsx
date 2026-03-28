@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createSessionAction, updateSessionAction } from '@/app/(app)/[churchSlug]/teaching/actions'
 import { Flow, TeachingSession } from '@/types/database'
 import type { LessonTypeOption } from '@/lib/lesson-types'
+import { groupFlowsForSessionType } from '@/lib/flow-groups'
 
 const VISIBILITY_OPTIONS: { value: string; label: string; desc: string }[] = [
   { value: 'private', label: 'Private', desc: 'Only you' },
@@ -20,6 +21,7 @@ interface SeriesContext {
 interface Props {
   churchId: string
   churchSlug: string
+  currentUserId: string
   session?: TeachingSession
   flows?: Flow[]
   lessonTypes?: LessonTypeOption[]
@@ -30,6 +32,7 @@ interface Props {
 export function SessionForm({
   churchId,
   churchSlug,
+  currentUserId,
   session,
   flows = [],
   lessonTypes = [],
@@ -42,13 +45,27 @@ export function SessionForm({
   const initialType = session?.type ?? lessonTypes[0]?.key ?? 'sermon'
   const [lessonType, setLessonType] = useState(initialType)
 
-  const fallbackDefaultFlowId = useMemo(() => {
-    const matched = lessonTypes.find(type => type.key === lessonType)
-    return matched?.default_flow_id ?? ''
-  }, [lessonTypes, lessonType])
+  const getDefaultFlowIdForType = (typeKey: string) => {
+    const matched = lessonTypes.find(type => type.key === typeKey)
+    const defaultId = matched?.default_flow_id ?? ''
+    return defaultId && flows.some(flow => flow.id === defaultId) ? defaultId : ''
+  }
 
-  const effectiveSelectedFlowId =
-    session?.selected_flow_id ?? selectedFlowId ?? fallbackDefaultFlowId ?? ''
+  const fallbackDefaultFlowId = useMemo(() => getDefaultFlowIdForType(lessonType), [lessonType, lessonTypes, flows])
+  const initialFlowId = session?.selected_flow_id ?? selectedFlowId ?? getDefaultFlowIdForType(initialType) ?? ''
+  const [flowId, setFlowId] = useState(initialFlowId)
+  const [flowWasManuallyChanged, setFlowWasManuallyChanged] = useState(Boolean(session?.selected_flow_id))
+
+  useEffect(() => {
+    if (!flowWasManuallyChanged) {
+      setFlowId(fallbackDefaultFlowId)
+    }
+  }, [fallbackDefaultFlowId, flowWasManuallyChanged])
+
+  const flowGroups = useMemo(
+    () => groupFlowsForSessionType(flows, lessonType, currentUserId),
+    [flows, lessonType, currentUserId]
+  )
 
   return (
     <form action={action} className="space-y-5">
@@ -158,7 +175,7 @@ export function SessionForm({
         {flows.length === 0 ? (
           <div className="border border-dashed border-slate-300 rounded-xl p-4 bg-slate-50">
             <p className="text-sm text-slate-600">No flows created yet for this church.</p>
-            <Link href={`/${churchSlug}/settings/church-setup/flows`} className="inline-flex mt-3 text-sm font-medium text-violet-700 hover:text-violet-800">
+            <Link href={`/${churchSlug}/flows/new?scope=personal`} className="inline-flex mt-3 text-sm font-medium text-violet-700 hover:text-violet-800">
               Create a Flow
             </Link>
           </div>
@@ -166,19 +183,36 @@ export function SessionForm({
           <>
             <select
               name="flow_id"
-              defaultValue={effectiveSelectedFlowId}
+              value={flowId}
+              onChange={e => {
+                setFlowId(e.target.value)
+                setFlowWasManuallyChanged(true)
+              }}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
             >
               <option value="">No flow — start blank</option>
-              {flows.map(flow => (
-                <option key={flow.id} value={flow.id}>{flow.name}</option>
-              ))}
+              {flowGroups.church.length > 0 && (
+                <optgroup label="Shared Flows">
+                  {flowGroups.church.map(flow => (
+                    <option key={flow.id} value={flow.id}>{flow.name}</option>
+                  ))}
+                </optgroup>
+              )}
+              {flowGroups.personal.length > 0 && (
+                <optgroup label="My Flows">
+                  {flowGroups.personal.map(flow => (
+                    <option key={flow.id} value={flow.id}>{flow.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            <div className="flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center justify-between text-xs text-slate-500 gap-3">
               <span>
-                {fallbackDefaultFlowId ? 'The church default for this lesson type is preselected when available.' : 'Choose a flow only if you want one to guide outline generation.'}
+                {fallbackDefaultFlowId
+                  ? 'The lesson type default will be selected automatically until you choose a different flow.'
+                  : 'Choose a flow only if you want one to guide outline generation.'}
               </span>
-              <Link href={`/${churchSlug}/settings/church-setup/flows`} className="font-medium text-violet-700 hover:text-violet-800">
+              <Link href={`/${churchSlug}/flows/new?scope=personal`} className="font-medium text-violet-700 hover:text-violet-800 whitespace-nowrap">
                 Create a Flow
               </Link>
             </div>

@@ -48,15 +48,15 @@ export function AppNav({ churchSlug, churchName, userRole, isSystemAdmin = false
       const isOpen = document.documentElement.classList.contains('teaching-nav-open')
       setDesktopPeekOpen(isOpen)
     }
-  
+
     const observer = new MutationObserver(syncFromClass)
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class'],
     })
-  
+
     syncFromClass()
-  
+
     return () => observer.disconnect()
   }, [])
 
@@ -73,12 +73,31 @@ export function AppNav({ churchSlug, churchName, userRole, isSystemAdmin = false
       if (!isTeachingDetail) return
       setDesktopPeekOpen(v => !v)
     }
-  
+
     window.addEventListener('toggle-teaching-nav', onToggle)
-  
+
     return () => {
       window.removeEventListener('toggle-teaching-nav', onToggle)
     }
+  }, [isTeachingDetail])
+
+  useEffect(() => {
+    setMobileOpen(false)
+    if (!isTeachingDetail) {
+      setDesktopPeekOpen(false)
+    }
+  }, [pathname, isTeachingDetail])
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileOpen(false)
+        if (isTeachingDetail) setDesktopPeekOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [isTeachingDetail])
 
   const base = `/${churchSlug}`
@@ -190,15 +209,16 @@ export function AppNav({ churchSlug, churchName, userRole, isSystemAdmin = false
 
   return (
     <>
-    <button
-  id="appnav-teaching-toggle"
-  type="button"
-  className="hidden"
-  aria-hidden="true"
-  onClick={() => {
-    if (isTeachingDetail) setDesktopPeekOpen(v => !v)
-  }}
-/>
+      <button
+        id="appnav-teaching-toggle"
+        type="button"
+        className="hidden"
+        aria-hidden="true"
+        onClick={() => {
+          if (isTeachingDetail) setDesktopPeekOpen(v => !v)
+        }}
+      />
+
       <aside
         className={`hidden md:flex flex-col fixed left-0 top-0 h-full w-64 bg-white border-r border-slate-200 z-50 transition-transform duration-200 ${
           isTeachingDetail
@@ -209,8 +229,23 @@ export function AppNav({ churchSlug, churchName, userRole, isSystemAdmin = false
         }`}
       >
         <div className="px-5 py-5 border-b border-slate-100">
-          <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">Teaching</p>
-          <p className="text-sm font-semibold text-slate-900 truncate">{churchName}</p>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">Teaching</p>
+              <p className="text-sm font-semibold text-slate-900 truncate">{churchName}</p>
+            </div>
+            {isTeachingDetail && (
+              <button
+                type="button"
+                onClick={() => setDesktopPeekOpen(false)}
+                className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                aria-label="Close menu"
+                title="Close menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
           {switcher}
         </div>
 
@@ -257,7 +292,9 @@ export function AppNav({ churchSlug, churchName, userRole, isSystemAdmin = false
           <div className="absolute right-0 top-0 h-full w-80 bg-white shadow-xl overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b">
               <p className="text-sm font-semibold">{churchName}</p>
-              <button onClick={() => setMobileOpen(false)}><X className="w-5 h-5 text-slate-400" /></button>
+              <button type="button" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
             </div>
             {churchOptions.length > 1 && (
               <div className="px-3 py-3 border-b border-slate-100">

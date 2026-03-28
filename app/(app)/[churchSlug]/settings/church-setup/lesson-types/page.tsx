@@ -40,6 +40,7 @@ export default async function ChurchLessonTypesPage({ params }: Props) {
       .from('flows')
       .select('id, name')
       .eq('church_id', church.id)
+      .is('owner_user_id', null)
       .eq('is_archived', false)
       .order('name'),
   ])
@@ -154,7 +155,7 @@ export default async function ChurchLessonTypesPage({ params }: Props) {
                     href={`/${churchSlug}/settings/church-setup/flows`}
                     className="font-medium text-violet-700 hover:text-violet-800"
                   >
-                    Create a Flow
+                    Create a Shared Flow
                   </Link>
                 </div>
               )}

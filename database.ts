@@ -16,10 +16,19 @@ export type NotificationCategory = 'teaching' | 'system'
 export type ImportSourceType = 'text_paste' | 'txt' | 'docx'
 export type ImportStatus = 'pending' | 'reviewed' | 'applied' | 'discarded'
 
+export type AIProvenanceLabel =
+  | 'ai_drafted'
+  | 'ai_reworded_notes'
+  | 'ai_summarized_study'
+  | 'ai_blended_notes_and_study'
+
 export interface AISource {
   model: string
   prompt_version: string
   confidence: Confidence
+  provenance_label?: AIProvenanceLabel | null
+  used_user_notes?: boolean
+  used_study_material?: boolean
 }
 
 export interface ScriptureData {

@@ -270,7 +270,11 @@ export async function incrementNoteUsageAction(
 export async function generateVerseInsightsAction(
   sessionId: string,
   churchId: string,
-  selectedWords?: Record<string, string[]>   // verse_ref → words chosen by teacher
+  options?: {
+    selectedWords?: Record<string, string[]>   // verse_ref → words chosen by teacher
+    selectedVerseRefs?: string[]
+    researchDepth?: ResearchDepth
+  }
 ): Promise<{ error: string | null; count: number }> {
   const user = await getActionUser()
   if (!user) return { error: 'Session expired — please refresh.', count: 0 }
@@ -289,6 +293,15 @@ export async function generateVerseInsightsAction(
     const verses = await fetchPassage(session.scripture_ref)
     if (verses.length === 0) return { error: 'Could not load scripture text.', count: 0 }
 
+    const requestedVerseRefs = (options?.selectedVerseRefs ?? []).filter(Boolean)
+    const filteredVerses = requestedVerseRefs.length
+      ? verses.filter(v => requestedVerseRefs.includes(v.verse_ref))
+      : verses
+
+    if (filteredVerses.length === 0) {
+      return { error: 'Choose at least one verse to research.', count: 0 }
+    }
+
     // Load pastor's notes to send as context for more relevant insights
     const { data: noteRows } = await supabaseAdmin
       .from('verse_notes')
@@ -305,13 +318,22 @@ export async function generateVerseInsightsAction(
 
     const tradition = await getUserTradition(user.id)
 
+    const selectedWords = options?.selectedWords ?? {}
+    const filteredNotesContext = requestedVerseRefs.length
+      ? Object.fromEntries(Object.entries(notesContext).filter(([verseRef]) => requestedVerseRefs.includes(verseRef)))
+      : notesContext
+    const filteredSelectedWords = requestedVerseRefs.length
+      ? Object.fromEntries(Object.entries(selectedWords).filter(([verseRef]) => requestedVerseRefs.includes(verseRef)))
+      : selectedWords
+
     const result = await generateVerseInsights(user.id, {
-      verses,
+      verses: filteredVerses,
       sessionTitle: session.title,
       sessionType: session.type,
       tradition,
-      pastorNotes: notesContext,
-      selectedWords: selectedWords ?? {},
+      pastorNotes: filteredNotesContext,
+      selectedWords: filteredSelectedWords,
+      researchDepth: options?.researchDepth ?? 'quick',
     })
 
     // Save ALL rows before returning — never show without persisting
@@ -325,7 +347,7 @@ export async function generateVerseInsightsAction(
       insight.category === 'word_study'
         ? filterWordStudyItems(
         dedupeInsightItems(insight.items ?? []),
-        selectedWords?.[insight.verse_ref] ?? []
+        filteredSelectedWords?.[insight.verse_ref] ?? []
         )
         : dedupeInsightItems(insight.items ?? []),
       model: result.model,
@@ -548,6 +570,7 @@ export async function generatePericopeInsightsAction(
   churchId: string,
   section: PericopeSection,
   selectedWords: string[] = [],
+  researchDepth: ResearchDepth = 'quick',
 ): Promise<{
   error: string | null
   sectionKey?: string
@@ -583,6 +606,7 @@ export async function generatePericopeInsightsAction(
       sessionType: session.type,
       tradition,
       selectedWords,
+      researchDepth,
     })
 
     const generatedAt = new Date().toISOString()

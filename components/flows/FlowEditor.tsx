@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { archiveFlowAction, updateFlowAction } from '@/app/(app)/[churchSlug]/flows/actions'
 import { FlowBuilderFields } from '@/components/flows/FlowBuilderFields'
 import type { FlowStep, SessionType } from '@/types/database'
@@ -24,6 +25,7 @@ export function FlowEditor({
   initialSteps,
   initialDefaultFor,
 }: Props) {
+  const router = useRouter()
   const [name, setName] = useState(initialName)
   const [description, setDescription] = useState(initialDescription ?? '')
   const [explanation, setExplanation] = useState(initialExplanation ?? '')
@@ -52,6 +54,17 @@ export function FlowEditor({
     }
   }
 
+  async function handleArchive() {
+    setError(null)
+    const result = await archiveFlowAction(flowId, churchSlug)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    router.push(`/${churchSlug}/flows?scope=${result.scope ?? 'personal'}`)
+    router.refresh()
+  }
+
   return (
     <div className="space-y-6">
       <FlowBuilderFields
@@ -74,7 +87,7 @@ export function FlowEditor({
           </button>
           {error && <span className="text-sm text-red-600">{error}</span>}
         </div>
-        <button onClick={() => archiveFlowAction(flowId, churchSlug)} className="text-sm text-slate-500 hover:text-slate-800">
+        <button onClick={handleArchive} className="text-sm text-slate-500 hover:text-slate-800">
           Archive flow
         </button>
       </div>

@@ -20,6 +20,8 @@ export type OutlineSelectedInsight = {
   content: string
 }
 
+export type OutlineResearchDepth = 'quick' | 'deep'
+
 export type OutlinePromptParts = {
   requestRules: string[]
   flowSummaryText: string
@@ -29,6 +31,7 @@ export type OutlinePromptParts = {
   thoughtText: string
   verseNotesText: string
   selectedInsightsText: string
+  depthSummaryText: string
 }
 
 export function buildOutlinePromptParts(args: {
@@ -37,6 +40,7 @@ export function buildOutlinePromptParts(args: {
   verseNotesForAI?: Record<string, string>
   thoughts?: Array<{ content?: string | null }>
   sessionEstimatedDuration?: number | null
+  researchDepth?: OutlineResearchDepth
 }): OutlinePromptParts {
   const thoughtText =
     args.thoughts
@@ -94,6 +98,20 @@ export function buildOutlinePromptParts(args: {
         .join('\n')
     : ''
 
+  const researchDepth = args.researchDepth ?? 'quick'
+  const depthSummaryText = researchDepth === 'deep'
+    ? [
+        'Research depth: Deep Dive.',
+        'Use the pastor\'s notes and selected research to produce fuller, more developed outline material.',
+        'Give more complete sub-points, clearer transitions, stronger explanatory development, and richer applications where appropriate.',
+        'Aim for a more expansive and detailed outline than Quick Scan while still remaining an outline, not a manuscript.',
+      ].join(' ')
+    : [
+        'Research depth: Quick Scan.',
+        'Produce a tighter, lighter outline with concise points, fewer supporting layers, and shorter development.',
+        'Prefer clarity and speed over breadth while still giving a faithful preaching structure.',
+      ].join(' ')
+
   return {
     requestRules: [
       'Return ONLY a JSON array of blocks, no markdown, no explanation.',
@@ -116,6 +134,7 @@ export function buildOutlinePromptParts(args: {
     thoughtText,
     verseNotesText,
     selectedInsightsText,
+    depthSummaryText,
   }
 }
 
@@ -137,7 +156,8 @@ export function renderOutlinePromptForLLM(args: {
 Rules:
 ${parts.requestRules.join('\n')}
 - ${parts.flowSummaryText}
-${parts.durationRule}`
+${parts.durationRule}
+- ${parts.depthSummaryText}`
 
   const user = `Create a preaching outline for:
 

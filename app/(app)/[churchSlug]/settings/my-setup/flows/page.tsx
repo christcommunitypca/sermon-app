@@ -3,8 +3,9 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { FlowRowActions } from '@/components/flows/FlowRowActions'
-import { Flow, Role, SessionType } from '@/types/database'
+import { Flow, SessionType } from '@/types/database'
 import { ChevronLeft, Plus } from 'lucide-react'
+import { listPersonalFlows } from '@/lib/flow-library'
 
 interface Props { params: { churchSlug: string } }
 
@@ -17,7 +18,9 @@ const TYPE_LABELS: Record<SessionType, string> = {
 export default async function MyFlowsSettingsPage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
   if (!session) redirect('/sign-in')
 
   const { data: church } = await supabaseAdmin.from('churches').select('id').eq('slug', churchSlug).single()
@@ -32,13 +35,7 @@ export default async function MyFlowsSettingsPage({ params }: Props) {
     .single()
   if (!member) redirect('/sign-in?error=not_a_member')
 
-  const { data: flows } = await supabaseAdmin
-    .from('flows')
-    .select('*')
-    .eq('church_id', church.id)
-    .eq('teacher_id', session.user.id)
-    .eq('is_archived', false)
-    .order('name')
+  const flows = await listPersonalFlows(church.id, session.user.id)
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -47,19 +44,19 @@ export default async function MyFlowsSettingsPage({ params }: Props) {
       </Link>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">My Flows</h1>
-        {!flows?.length && <p className="text-sm text-slate-500 mt-1">Flows give the outline generator a sermon movement to follow. Create your first one to make lesson setup easier.</p>}
+        {!flows.length && <p className="text-sm text-slate-500 mt-1">Flows give the outline generator a sermon movement to follow. Create your first one to make lesson setup easier.</p>}
       </div>
 
       <div className="flex justify-end mb-6">
-        <Link href={`/${churchSlug}/flows/new`} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
+        <Link href={`/${churchSlug}/flows/new?scope=personal`} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
           <Plus className="w-4 h-4" />Create flow
         </Link>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {(flows ?? []).map((flow: Flow) => (
+        {flows.map((flow: Flow) => (
           <div key={flow.id} className="relative group">
-            <Link href={`/${churchSlug}/flows/${flow.id}`} className="block bg-white border border-slate-100 rounded-xl p-5 hover:border-slate-300 hover:shadow-sm transition-all">
+            <Link href={`/${churchSlug}/flows/${flow.id}?scope=personal`} className="block bg-white border border-slate-100 rounded-xl p-5 hover:border-slate-300 hover:shadow-sm transition-all">
               <div className="flex items-start justify-between mb-2 pr-6 gap-2">
                 <h3 className="font-semibold text-slate-900">{flow.name}</h3>
                 {flow.is_default_for && (
@@ -80,7 +77,7 @@ export default async function MyFlowsSettingsPage({ params }: Props) {
         ))}
       </div>
 
-      {!flows?.length && (
+      {!flows.length && (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-500">
           No personal flows yet. Create one and it will show up here.
         </div>

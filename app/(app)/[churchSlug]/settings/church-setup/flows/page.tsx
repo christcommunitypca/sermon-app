@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { Flow, SessionType } from '@/types/database'
 import { ChevronLeft, Plus } from 'lucide-react'
+import { FlowRowActions } from '@/components/flows/FlowRowActions'
+import { listSharedFlows } from '@/lib/flow-library'
 
 interface Props { params: { churchSlug: string } }
 
@@ -16,7 +18,9 @@ const TYPE_LABELS: Record<SessionType, string> = {
 export default async function ChurchFlowsSettingsPage({ params }: Props) {
   const { churchSlug } = params
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
   if (!session) redirect('/sign-in')
 
   const { data: church } = await supabaseAdmin.from('churches').select('id, name').eq('slug', churchSlug).single()
@@ -32,14 +36,9 @@ export default async function ChurchFlowsSettingsPage({ params }: Props) {
   if (!member) redirect('/sign-in?error=not_a_member')
   if (!(member.role === 'owner' || member.role === 'admin')) redirect(`/${churchSlug}/settings/my-setup/flows`)
 
-  const { data: flows } = await supabaseAdmin
-    .from('flows')
-    .select('*')
-    .eq('church_id', church.id)
-    .eq('is_archived', false)
-    .order('updated_at', { ascending: false })
+  const flows = await listSharedFlows(church.id)
 
-  const creatorIds = Array.from(new Set((flows ?? []).map(flow => flow.teacher_id)))
+  const creatorIds = Array.from(new Set(flows.map(flow => flow.teacher_id).filter(Boolean)))
   const { data: profiles } = creatorIds.length
     ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', creatorIds)
     : { data: [] as Array<{ id: string; full_name: string | null }> }
@@ -52,22 +51,21 @@ export default async function ChurchFlowsSettingsPage({ params }: Props) {
       </Link>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Shared Flows</h1>
-        {!flows?.length && <p className="text-sm text-slate-500 mt-1">Shared flows give teachers a common starting point when they create a lesson.</p>}
+        {!flows.length && <p className="text-sm text-slate-500 mt-1">Shared flows give teachers a common starting point when they create a lesson.</p>}
       </div>
 
       <div className="flex items-center justify-between mb-6">
         <div className="text-sm text-slate-500">Use a shared default only when you want it to be the obvious starting point for that lesson type.</div>
-        <Link href={`/${churchSlug}/flows/new`} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
+        <Link href={`/${churchSlug}/flows/new?scope=church`} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
           <Plus className="w-4 h-4" />Create flow
         </Link>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {(flows ?? []).map((flow: Flow) => {
-          const editable = flow.teacher_id === session.user.id
-          const inner = (
-            <>
-              <div className="flex items-start justify-between gap-2 mb-2">
+        {flows.map((flow: Flow) => (
+          <div key={flow.id} className="relative group">
+            <Link href={`/${churchSlug}/flows/${flow.id}?scope=church`} className="block bg-white border border-slate-100 rounded-xl p-5 hover:border-slate-300 hover:shadow-sm transition-all">
+              <div className="flex items-start justify-between gap-2 mb-2 pr-6">
                 <div>
                   <h3 className="font-semibold text-slate-900">{flow.name}</h3>
                   <p className="text-xs text-slate-400 mt-1">Created by {profileMap.get(flow.teacher_id) ?? 'Unknown user'}</p>
@@ -82,19 +80,15 @@ export default async function ChurchFlowsSettingsPage({ params }: Props) {
                   <span key={step.id ?? i} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">{step.title}</span>
                 ))}
               </div>
-            </>
-          )
-          return editable ? (
-            <Link key={flow.id} href={`/${churchSlug}/flows/${flow.id}`} className="block bg-white border border-slate-100 rounded-xl p-5 hover:border-slate-300 hover:shadow-sm transition-all">
-              {inner}
             </Link>
-          ) : (
-            <div key={flow.id} className="bg-white border border-slate-100 rounded-xl p-5">{inner}</div>
-          )
-        })}
+            <div className="absolute top-3 right-3">
+              <FlowRowActions flowId={flow.id} churchId={church.id} churchSlug={churchSlug} isArchived={false} />
+            </div>
+          </div>
+        ))}
       </div>
 
-      {!flows?.length && (
+      {!flows.length && (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-500">
           No shared flows yet.
         </div>

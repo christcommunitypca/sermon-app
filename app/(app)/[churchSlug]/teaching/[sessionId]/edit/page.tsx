@@ -5,13 +5,16 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { SessionForm } from '@/components/teaching/SessionForm'
 import { ChevronLeft } from 'lucide-react'
 import { getEnabledChurchLessonTypes } from '@/lib/lesson-types'
+import { listAccessibleFlows } from '@/lib/flow-library'
 
 interface Props { params: { churchSlug: string; sessionId: string } }
 
 export default async function EditSessionPage({ params }: Props) {
   const { churchSlug, sessionId } = params
   const supabase = await createClient()
-  const { data: { session: authSession } } = await supabase.auth.getSession()
+  const {
+    data: { session: authSession },
+  } = await supabase.auth.getSession()
   if (!authSession) redirect('/sign-in')
   const user = authSession.user
 
@@ -40,8 +43,8 @@ export default async function EditSessionPage({ params }: Props) {
       }
     : null
 
-  const [flowsResult, lessonTypes] = await Promise.all([
-    supabaseAdmin.from('flows').select('*').eq('church_id', church.id).eq('teacher_id', user.id).order('name'),
+  const [flows, lessonTypes] = await Promise.all([
+    listAccessibleFlows(church.id, user.id),
     getEnabledChurchLessonTypes(church.id),
   ])
 
@@ -55,8 +58,9 @@ export default async function EditSessionPage({ params }: Props) {
         <SessionForm
           churchId={church.id}
           churchSlug={churchSlug}
+          currentUserId={user.id}
           session={session}
-          flows={flowsResult.data ?? []}
+          flows={flows}
           lessonTypes={lessonTypes}
           seriesContext={seriesContext}
         />

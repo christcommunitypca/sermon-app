@@ -12,7 +12,7 @@
 import type { PromptPayload } from '@/lib/ai/types'
 import type { VerseInsightInput } from '@/lib/ai/types'
 
-export const VERSION = 'v1.4'
+export const VERSION = 'v1.5'
 
 export const CATEGORIES = [
   'word_study',
@@ -72,6 +72,8 @@ export function buildBatchPrompt(
   categories: InsightCategory[]
 ): PromptPayload {
   const { verses, sessionTitle, sessionType, tradition } = input
+  const researchDepth = input.researchDepth ?? 'quick'
+  const isDeepDive = researchDepth === 'deep'
 
   const passageText = verses
     .map(v => {
@@ -105,6 +107,14 @@ export function buildBatchPrompt(
   const categorySpec = categories.map(cat =>
     `"${cat}": ${CATEGORY_DESCRIPTIONS[cat]}`
   ).join('\n')
+
+  const itemLimit = isDeepDive ? 4 : 2
+  const contentRule = isDeepDive
+    ? 'Keep content substantive but still scannable: 2-4 sentences where needed.'
+    : 'Keep content brief: 1 short sentence, 2 only if needed.'
+  const depthRule = isDeepDive
+    ? '- Depth mode: Deep Dive. Give fuller explanation, stronger detail, and more useful specifics in each item.\n- Where relevant, include more than the most obvious cross-reference or application.'
+    : '- Depth mode: Quick Scan. Be concise, selective, and high value.'
 
   const verseRefs = verses.map(v => v.verse_ref).join(', ')
 
@@ -147,13 +157,10 @@ Rules:
 - Verses: ${verseRefs}
 - Categories:
 ${categorySpec}
-- items: MAX 2 per object.
-- Keep content brief: 1 short sentence, 2 only if needed.
-- No filler. No repeated ideas across categories.
+- items: MAX ${itemLimit} per object.\n- ${contentRule}\n- No filler. No repeated ideas across categories.
 - Cross-verse reasoning allowed.
 - Teacher tradition: ${tradition}. Weight application and theology_by_tradition accordingly.
-- ${wordStudyInstruction}
-- Include source_label and source_url only when you know a reliable source.
+- ${wordStudyInstruction}\n${depthRule}\n- Include source_label and source_url only when you know a reliable source.
 - If unsure, omit source_label and source_url.
 - Never fabricate quotes, citations, or URLs.`
 
@@ -163,7 +170,7 @@ const user = `Passage: ${sessionTitle} (${sessionType})
 
 ${passageText}
 
-Generate ${categories.join(', ')}. JSON only.`
+Generate ${categories.join(', ')} in ${isDeepDive ? 'Deep Dive' : 'Quick Scan'} mode. JSON only.`
 
   return { system, user, version: VERSION, temperature: 0.3 }
 }

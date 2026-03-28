@@ -159,6 +159,8 @@ export interface TagResult extends AIResultMeta {
 
 // ── Verse Insights ────────────────────────────────────────────────────────────
 
+export type ResearchDepth = 'quick' | 'deep'
+
 export interface VerseInsightInput {
   verses: import('@/lib/esv').VerseData[]
   sessionTitle: string
@@ -166,6 +168,7 @@ export interface VerseInsightInput {
   tradition: string
   pastorNotes?: Record<string, string[]>   // verse_ref → notes[], sent as context to AI
   selectedWords?: Record<string, string[]> // verse_ref → words teacher wants studied
+  researchDepth?: ResearchDepth
 }
 
 export interface InsightItem {

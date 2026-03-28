@@ -205,17 +205,11 @@ export async function setSessionFlowAction(args: {
     return {}
   }
 
-  const { data: flow } = await supabaseAdmin
-    .from('flows')
-    .select('*')
-    .eq('id', flowId)
-    .eq('church_id', churchId)
-    .eq('is_archived', false)
-    .single()
+  const flow = await resolveSelectedFlow(flowId, churchId, user.id)
 
   if (!flow) return { error: 'Flow not found.' }
 
-  const snapshot = buildSelectedFlowSnapshot(flow as any)
+  const snapshot = buildSelectedFlowSnapshot(flow)
 
   const { error } = await supabaseAdmin
     .from('teaching_sessions')

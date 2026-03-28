@@ -21,6 +21,7 @@ import {
   splitVerseNotesAction,
 } from '@/app/actions/verse-study'
 import { toggleInsightFlagAction } from '@/app/actions/verse-study'
+import type { ResearchDepth } from '@/lib/ai/types'
 import { parseWordStudyTitle } from '@/lib/word-study'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -307,6 +308,11 @@ export function PericopePanel({
   const [mobileTabBySection, setMobileTabBySection] = useState<Record<string, 'scripture' | 'notes' | 'research'>>({})
   const [generatingBySection, setGeneratingBySection] = useState<Record<string, boolean>>({})
   const [organizingBySection, setOrganizingBySection] = useState<Record<string, boolean>>({})
+  const [researchDepthBySection, setResearchDepthBySection] = useState<Record<string, ResearchDepth>>({})
+  const [researchModalSectionKey, setResearchModalSectionKey] = useState<string | null>(null)
+  const [researchPromptPreview, setResearchPromptPreview] = useState('')
+  const [researchLLMPromptPreview, setResearchLLMPromptPreview] = useState('')
+  const [showResearchPromptModal, setShowResearchPromptModal] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedWordsBySection, setSelectedWordsBySection] = useState<Record<string, string[]>>({})
   const [showWordToolsBySection, setShowWordToolsBySection] = useState<Record<string, boolean>>({})
@@ -401,43 +407,90 @@ export function PericopePanel({
     return Object.values(insights[sectionKey] ?? {}).some(items => items.length > 0)
   }
 
-  async function handleGenerateForSection(block: (typeof blocks)[number]) {
-    const sectionKey = block.sectionKey
-    setGeneratingBySection(prev => ({ ...prev, [sectionKey]: true }))
-    setError(null)
+  
+async function handleGenerateForSection(
+  block: (typeof blocks)[number],
+  config?: { scope?: 'section' | 'whole_passage'; depth?: ResearchDepth }
+) {
+  const sectionKey = block.sectionKey
+  const scope = config?.scope ?? 'section'
+  const depth = config?.depth ?? researchDepthBySection[sectionKey] ?? 'quick'
+  const targetBlocks = scope === 'whole_passage' ? blocks : [block]
+  const targetKeys = targetBlocks.map(entry => entry.sectionKey)
 
-    const result = await generatePericopeInsightsAction(
-      sessionId,
-      churchId,
-      {
-        label: titleDrafts[sectionKey] || block.section.label,
-        startVerse: block.section.startVerse,
-        verses: block.verses,
-      },
-      (selectedWordsBySection[sectionKey] ?? []).slice(0, 5),
-    )
+  setGeneratingBySection(prev => {
+    const next = { ...prev }
+    for (const key of targetKeys) next[key] = true
+    return next
+  })
+  setError(null)
 
-    setGeneratingBySection(prev => ({ ...prev, [sectionKey]: false }))
-
-    if (result.error) {
-      setError(result.error)
-      return
-    }
-
-    if (result.sectionKey && result.insights) {
-      onInsightsChange({
-        ...insights,
-        [result.sectionKey]: {
-          ...(insights[result.sectionKey] ?? {}),
-          ...result.insights,
+  try {
+    for (const entry of targetBlocks) {
+      const entryKey = entry.sectionKey
+      const result = await generatePericopeInsightsAction(
+        sessionId,
+        churchId,
+        {
+          label: titleDrafts[entryKey] || entry.section.label,
+          startVerse: entry.section.startVerse,
+          verses: entry.verses,
         },
-      })
+        (selectedWordsBySection[entryKey] ?? []).slice(0, 5),
+        depth,
+      )
+
+      if (result.error) {
+        setError(result.error)
+        break
+      }
+
+      if (result.sectionKey && result.insights) {
+        onInsightsChange(prev => ({
+          ...prev,
+          [result.sectionKey!]: {
+            ...(prev[result.sectionKey!] ?? {}),
+            ...result.insights,
+          },
+        }))
+      }
     }
 
     onActiveSectionChange(block.idx)
     setMobileTabBySection(prev => ({ ...prev, [sectionKey]: 'research' }))
     setActiveCategoryBySection(prev => ({ ...prev, [sectionKey]: 'context' }))
+    setResearchModalSectionKey(null)
+  } finally {
+    setGeneratingBySection(prev => {
+      const next = { ...prev }
+      for (const key of targetKeys) next[key] = false
+      return next
+    })
   }
+}
+
+
+
+function handleViewResearchPrompt(
+  block: (typeof blocks)[number],
+  config?: { scope?: 'section' | 'whole_passage'; depth?: ResearchDepth }
+) {
+  const sectionKey = block.sectionKey
+  const scope = config?.scope ?? 'section'
+  const depth = config?.depth ?? researchDepthBySection[sectionKey] ?? 'quick'
+  const preview = buildPericopeResearchPromptPreview({
+    scriptureRef: verses?.[0]?.verse_ref ?? null,
+    sectionLabel: titleDrafts[sectionKey] || block.section.label,
+    sectionVerses: block.verses,
+    wholePassageVerses: verses,
+    selectedWords: (selectedWordsBySection[sectionKey] ?? []).slice(0, 5),
+    depth,
+    scope,
+  })
+  setResearchPromptPreview(preview.humanPrompt)
+  setResearchLLMPromptPreview(preview.llmPrompt)
+  setShowResearchPromptModal(true)
+}
 
   async function handleSaveTitle(block: (typeof blocks)[number]) {
     const sectionKey = block.sectionKey
@@ -855,12 +908,12 @@ export function PericopePanel({
                 )}
                 {titleSavingBySection[sectionKey] && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300" />}
                 <button
-                  onClick={() => !hasResearch && handleGenerateForSection(block)}
-                  disabled={hasResearch || generatingBySection[sectionKey]}
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors shrink-0 ${hasResearch ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-violet-700 hover:bg-violet-50 border border-violet-200'}`}
+                  onClick={() => setResearchModalSectionKey(sectionKey)}
+                  disabled={generatingBySection[sectionKey]}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors shrink-0 ${generatingBySection[sectionKey] ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-violet-700 hover:bg-violet-50 border border-violet-200'}`}
                 >
                   {generatingBySection[sectionKey] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                  {generatingBySection[sectionKey] ? 'Generating…' : hasResearch ? 'AI ready' : 'Generate AI'}
+                  {generatingBySection[sectionKey] ? 'Generating…' : hasResearch ? 'Regenerate AI' : 'Generate AI'}
                 </button>
               </div>
 
@@ -912,9 +965,155 @@ export function PericopePanel({
           )
         })}
       </div>
+
+      {researchModalSectionKey && (() => {
+        const block = blocks.find(entry => entry.sectionKey === researchModalSectionKey)
+        if (!block) return null
+        const depth = researchDepthBySection[researchModalSectionKey] ?? 'quick'
+        const generating = !!generatingBySection[researchModalSectionKey]
+        return (
+          <PericopeResearchConfigModal
+            sectionLabel={titleDrafts[researchModalSectionKey] || block.section.label}
+            depth={depth}
+            onDepthChange={(value) => setResearchDepthBySection(prev => ({ ...prev, [researchModalSectionKey]: value }))}
+            onClose={() => setResearchModalSectionKey(null)}
+            onViewPrompt={(scope) => handleViewResearchPrompt(block, { scope, depth })}
+            onGenerate={(scope) => handleGenerateForSection(block, { scope, depth })}
+            generating={generating}
+          />
+        )
+      })()}
+
+      {showResearchPromptModal && (
+        <PericopePromptPreviewModal
+          humanPrompt={researchPromptPreview}
+          llmPrompt={researchLLMPromptPreview}
+          onClose={() => setShowResearchPromptModal(false)}
+        />
+      )}
     </div>
   )
 }
+
+function PericopeResearchConfigModal({
+  sectionLabel,
+  depth,
+  onDepthChange,
+  onClose,
+  onViewPrompt,
+  onGenerate,
+  generating,
+}: {
+  sectionLabel: string
+  depth: ResearchDepth
+  onDepthChange: (depth: ResearchDepth) => void
+  onClose: () => void
+  onViewPrompt: (scope: 'section' | 'whole_passage') => void
+  onGenerate: (scope: 'section' | 'whole_passage') => void
+  generating: boolean
+}) {
+  const [scope, setScope] = useState<'section' | 'whole_passage'>('section')
+  const disabled = generating
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Generate AI Research</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Choose the scope and depth, then either preview the prompt or send it to AI.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="px-6 py-5 space-y-5 max-h-[75vh] overflow-y-auto">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Scope</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => setScope('section')} className={`text-left rounded-xl border px-3 py-2 ${scope === 'section' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">This Section</div>
+                <div className="text-xs text-slate-400">Generate research only for {sectionLabel}.</div>
+              </button>
+              <button type="button" onClick={() => setScope('whole_passage')} className={`text-left rounded-xl border px-3 py-2 ${scope === 'whole_passage' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Whole Passage</div>
+                <div className="text-xs text-slate-400">Generate research for every section in this passage.</div>
+              </button>
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Depth</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => onDepthChange('quick')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'quick' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Quick Scan</div>
+                <div className="text-xs text-slate-400">A lighter first pass with fewer items and shorter explanations.</div>
+              </button>
+              <button type="button" onClick={() => onDepthChange('deep')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'deep' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Deep Dive</div>
+                <div className="text-xs text-slate-400">Richer output with more items, more context, fuller theology, and stronger application.</div>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Cancel</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => onViewPrompt(scope)} disabled={disabled} className="px-4 py-2 text-xs font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50">View Prompt</button>
+            <button onClick={() => onGenerate(scope)} disabled={disabled} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50">
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {generating ? 'Generating…' : 'Send to AI'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PericopePromptPreviewModal({
+  humanPrompt,
+  llmPrompt,
+  onClose,
+}: {
+  humanPrompt: string
+  llmPrompt: string
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const [activeView, setActiveView] = useState<'human' | 'llm'>('human')
+  const displayedPrompt = activeView === 'human' ? humanPrompt : llmPrompt
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(displayedPrompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Research Prompt Preview</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Review or copy the prompt before sending it to any AI tool.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-4">
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => setActiveView('human')} className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${activeView === 'human' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Human Readable</button>
+            <button onClick={() => setActiveView('llm')} className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${activeView === 'llm' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>LLM Prompt</button>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto">
+            <pre className="text-xs leading-relaxed text-slate-700 whitespace-pre-wrap break-words">{displayedPrompt}</pre>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Close</button>
+          <button onClick={handleCopy} className="px-4 py-2 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">{copied ? 'Copied' : 'Copy to Clipboard'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 // ── ResearchItem ──────────────────────────────────────────────────────────────
 

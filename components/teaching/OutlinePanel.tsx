@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Plus, Trash2, Clock, Save, Sparkles, RotateCcw, Check, X,
@@ -27,6 +27,7 @@ import {
   renderOutlinePromptForLLM,
   type OutlineSelectedFlow,
   type OutlineSelectedInsight,
+  type OutlineResearchDepth,
 } from '@/lib/outlinePrompt'
 
 const BLOCK_TYPE_LABELS: Record<OutlineBlock['type'], string> = {
@@ -58,6 +59,14 @@ const MAX_DEPTH = 4
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type Insights = Record<string, Record<string, { title: string; content: string; is_flagged?: boolean; used_count?: number }[]>>
 
+type DraftOutlineScope = 'all_verses' | 'selected_verses'
+
+type DraftOutlineOptions = {
+  scope: DraftOutlineScope
+  selectedVerseRefs: string[]
+  depth: OutlineResearchDepth
+}
+
 interface Props {
   outlineId: string
   sessionId: string
@@ -80,13 +89,35 @@ interface Props {
   onPendingFromRef: (item: PendingItem) => void
   onCancelPending:  () => void
   steps:            StepState[]
-  activeReferenceTab?: 'notes' | 'ai'
-  onReferenceTabChange?: (tab: 'notes' | 'ai') => void
+  activeReferenceTab?: 'scripture' | 'notes' | 'ai'
+  onReferenceTabChange?: (tab: 'scripture' | 'notes' | 'ai') => void
   activeSectionVerseRefs?: string[]
   sessionTitle: string
   sessionType: string
   sessionNotes?: string | null
   scriptureRef?: string | null
+}
+
+function filterOutlineRefs<T extends { verseRef: string }>(items: T[], options: DraftOutlineOptions) {
+  if (options.scope !== 'selected_verses') return items
+  const allowed = new Set(options.selectedVerseRefs)
+  return items.filter(item => item.verseRef === 'session:shared' || allowed.has(item.verseRef))
+}
+
+function filterOutlineNotes(
+  verseNotes: Record<string, VerseNote[]>,
+  options: DraftOutlineOptions
+) {
+  const allowed = new Set(options.selectedVerseRefs)
+  const notesForAI: Record<string, string> = {}
+
+  for (const [vRef, notes] of Object.entries(verseNotes)) {
+    if (options.scope === 'selected_verses' && !allowed.has(vRef)) continue
+    const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
+    if (text) notesForAI[vRef] = text
+  }
+
+  return notesForAI
 }
 
 export function OutlinePanel({
@@ -350,7 +381,8 @@ export function OutlinePanel({
 
   function handleViewPrompt(
     selectedInsights?: OutlineSelectedInsight[],
-    verseNotesForAI?: Record<string, string>
+    verseNotesForAI?: Record<string, string>,
+    researchDepth: OutlineResearchDepth = 'quick'
   ) {
     const parts = buildOutlinePromptParts({
       selectedFlow,
@@ -358,6 +390,7 @@ export function OutlinePanel({
       verseNotesForAI,
       thoughts: [],
       sessionEstimatedDuration: estimatedDuration,
+      researchDepth,
     })
 
     const sessionForPreview = {
@@ -388,7 +421,8 @@ export function OutlinePanel({
   // ── AI generation ────────────────────────────────────────────────────────────
   async function handleGenerateAI(
     selectedInsights?: OutlineSelectedInsight[],
-    verseNotesForAI?: Record<string, string>
+    verseNotesForAI?: Record<string, string>,
+    researchDepth: OutlineResearchDepth = 'quick'
   ) {
     setAILoading(true)
     setAIError(null)
@@ -399,6 +433,7 @@ export function OutlinePanel({
         selectedFlow,
         selectedInsights,
         verseNotes: verseNotesForAI,
+        researchDepth,
       })
 
       if (data.error || !data.blocks) {
@@ -671,7 +706,7 @@ export function OutlinePanel({
           onInsightsChange={onInsightsChange}
           activeTab={activeReferenceTab}
           onActiveTabChange={(tab) => {
-            if (tab === 'notes' || tab === 'ai') onReferenceTabChange?.(tab)
+            if (tab === 'notes' || tab === 'ai' || tab === 'scripture') onReferenceTabChange?.(tab)
           }}
           hideTopTabs
         />
@@ -692,23 +727,17 @@ export function OutlinePanel({
           verseNotes={initialVerseNotes}
           aiLoading={aiLoading}
           hasBlocks={blocks.length > 0}
-          onGenerate={(selectedInsights) => {
+          availableVerseRefs={initialVerses.map(v => v.verse_ref)}
+          onGenerate={(selectedInsights, options) => {
             setShowDraftModal(false)
-            // Bundle notes for AI
-            const notesForAI: Record<string, string> = {}
-            for (const [vRef, notes] of Object.entries(initialVerseNotes)) {
-              const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
-              if (text) notesForAI[vRef] = text
-            }
-            handleGenerateAI(selectedInsights, notesForAI)
+            const notesForAI = filterOutlineNotes(initialVerseNotes, options)
+            const filteredInsights = filterOutlineRefs(selectedInsights, options)
+            handleGenerateAI(filteredInsights, notesForAI, options.depth)
           }}
-          onViewPrompt={(selectedInsights) => {
-            const notesForAI: Record<string, string> = {}
-            for (const [vRef, notes] of Object.entries(initialVerseNotes)) {
-              const text = notes.filter(n => n.content.trim()).map(n => n.content).join('\n')
-              if (text) notesForAI[vRef] = text
-            }
-            handleViewPrompt(selectedInsights, notesForAI)
+          onViewPrompt={(selectedInsights, options) => {
+            const notesForAI = filterOutlineNotes(initialVerseNotes, options)
+            const filteredInsights = filterOutlineRefs(selectedInsights, options)
+            handleViewPrompt(filteredInsights, notesForAI, options.depth)
           }}
           onClose={() => setShowDraftModal(false)}
         />
@@ -1243,7 +1272,7 @@ function AssistDropdown({ hasBlocks, aiLoading, onDraftOutline, onOutlineReview,
           icon={<Sparkles className="w-3.5 h-3.5" />}
           label={hasBlocks ? 'Redraft AI Outline' : 'AI Outline'}
           sublabel="AI builds an outline from your research & notes"
-          disabled={aiLoading}
+          disabled={aiLoading || (scope === 'selected_verses' && selectedVerseRefs.length === 0)}
           onClick={onDraftOutline}
         />
         <div className="h-px bg-slate-100 my-1" />
@@ -1282,13 +1311,16 @@ function DropdownItem({ icon, label, sublabel, onClick, disabled }: {
 }
 
 // ── Draft Outline Modal — pick which research items to include ─────────────────
-export function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, onGenerate, onViewPrompt, onClose }: {
+export function DraftOutlineModal({ insights, verseNotes, availableVerseRefs = [], aiLoading, hasBlocks, statusText, errorText, onGenerate, onViewPrompt, onClose }: {
   insights:    Insights
   verseNotes:  Record<string, import('@/types/database').VerseNote[]>
+  availableVerseRefs?: string[]
   aiLoading:   boolean
   hasBlocks:   boolean
-  onGenerate:  (selected: { verseRef: string; category: string; title: string; content: string }[]) => void
-  onViewPrompt: (selected: { verseRef: string; category: string; title: string; content: string }[]) => void
+  statusText?: string | null
+  errorText?: string | null
+  onGenerate:  (selected: { verseRef: string; category: string; title: string; content: string }[], options: DraftOutlineOptions) => void
+  onViewPrompt: (selected: { verseRef: string; category: string; title: string; content: string }[], options: DraftOutlineOptions) => void
   onClose:     () => void
 }) {
   // Build flat list of all research items
@@ -1297,8 +1329,32 @@ export function DraftOutlineModal({ insights, verseNotes, aiLoading, hasBlocks, 
       items.map((item, i) => ({ vRef, cat, item, key: `${vRef}||${cat}||${i}` }))
     )
   )
-  const [selected, setSelected] = useState<Set<string>>(new Set(allItems.map(a => a.key)))
 
+  const defaultSelected = useMemo(() => {
+    const flagged = allItems
+      .filter(a => a.item.is_flagged)
+      .map(a => a.key)
+
+    return new Set(flagged.length ? flagged : allItems.map(a => a.key))
+  }, [allItems])
+
+  const [selected, setSelected] = useState<Set<string>>(defaultSelected)
+  const allVerseRefs = useMemo(() => Array.from(new Set([
+    ...availableVerseRefs,
+    ...Object.keys(verseNotes).filter(ref => ref !== 'session:shared' && !ref.startsWith('pericope:')),
+    ...Object.keys(insights).filter(ref => ref !== 'session:shared' && !ref.startsWith('pericope:')),
+  ])).sort(), [availableVerseRefs, verseNotes, insights])
+  const [scope, setScope] = useState<DraftOutlineScope>('all_verses')
+  const [depth, setDepth] = useState<OutlineResearchDepth>('quick')
+  const [selectedVerseRefs, setSelectedVerseRefs] = useState<string[]>(allVerseRefs)
+
+  useEffect(() => {
+    setSelected(defaultSelected)
+  }, [defaultSelected])
+
+  useEffect(() => {
+    setSelectedVerseRefs(prev => prev.length ? prev.filter(ref => allVerseRefs.includes(ref)) : allVerseRefs)
+  }, [allVerseRefs])
   const [showGenerateMenu, setShowGenerateMenu] = useState(false)
 const generateMenuRef = useRef<HTMLDivElement>(null)
 
@@ -1320,11 +1376,15 @@ useEffect(() => {
   function selectAll()  { setSelected(new Set(allItems.map(a => a.key))) }
   function clearAll()   { setSelected(new Set()) }
 
+  function buildOptions(): DraftOutlineOptions {
+    return { scope, depth, selectedVerseRefs }
+  }
+
   function handleGenerate() {
     const selectedItems = allItems
       .filter(a => selected.has(a.key))
       .map(a => ({ verseRef: a.vRef, category: a.cat, ...a.item }))
-    onGenerate(selectedItems)
+    onGenerate(selectedItems, buildOptions())
   }
   
   const CAT_LABEL: Record<string, string> = {
@@ -1347,15 +1407,76 @@ useEffect(() => {
         </div>
 
         {/* Notes summary */}
-        <div className="px-6 pt-3 pb-0">
+        <div className="px-6 pt-3 pb-0 space-y-2">
           <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
             <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-            All your verse notes are always included automatically
+            Verse notes for the verses you choose are included automatically
           </div>
+          {statusText ? (
+            <div className="flex items-center gap-2 text-xs text-violet-700 bg-violet-50 rounded-lg px-3 py-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              {statusText}
+            </div>
+          ) : null}
+          {errorText ? (
+            <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 rounded-lg px-3 py-2">
+              <AlertCircle className="w-3.5 h-3.5" />
+              {errorText}
+            </div>
+          ) : null}
         </div>
 
         {/* Research selection */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Verses to use</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => setScope('all_verses')} className={`text-left rounded-xl border px-3 py-2 ${scope === 'all_verses' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">All verses</div>
+                <div className="text-xs text-slate-400">Include notes and research from the whole passage.</div>
+              </button>
+              <button type="button" onClick={() => setScope('selected_verses')} className={`text-left rounded-xl border px-3 py-2 ${scope === 'selected_verses' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Selected verses</div>
+                <div className="text-xs text-slate-400">Limit the outline prompt to the verses you choose below.</div>
+              </button>
+            </div>
+            {scope === 'selected_verses' && allVerseRefs.length > 0 && (
+              <div className="mt-3 rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-slate-600">Choose verses</p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <button type="button" onClick={() => setSelectedVerseRefs(allVerseRefs)} className="text-violet-600 hover:text-violet-800">All</button>
+                    <span className="text-slate-300">·</span>
+                    <button type="button" onClick={() => setSelectedVerseRefs([])} className="text-slate-500 hover:text-slate-700">None</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {allVerseRefs.map(ref => {
+                    const checked = selectedVerseRefs.includes(ref)
+                    return (
+                      <button key={ref} type="button" onClick={() => setSelectedVerseRefs(prev => prev.includes(ref) ? prev.filter(v => v !== ref) : [...prev, ref])} className={`rounded-lg border px-2.5 py-2 text-xs text-left ${checked ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                        {ref}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Depth</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => setDepth('quick')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'quick' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Quick Scan</div>
+                <div className="text-xs text-slate-400">Tighter outline. Fewer supporting layers and shorter development.</div>
+              </button>
+              <button type="button" onClick={() => setDepth('deep')} className={`text-left rounded-xl border px-3 py-2 ${depth === 'deep' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:border-slate-300 text-slate-700'}`}>
+                <div className="text-sm font-medium">Deep Dive</div>
+                <div className="text-xs text-slate-400">Richer development. Fuller sub-points, transitions, explanations, and applications.</div>
+              </button>
+            </div>
+          </div>
           {allItems.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">No research yet — the outline will be built from your notes alone.</p>
           ) : (
@@ -1412,11 +1533,12 @@ useEffect(() => {
   <div className="relative" ref={generateMenuRef}>
     <button
       type="button"
+      disabled={aiLoading || (scope === 'selected_verses' && selectedVerseRefs.length === 0)}
       onClick={() => setShowGenerateMenu(v => !v)}
-      className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+      className="flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
     >
       <Sparkles className="w-3.5 h-3.5" />
-      Generate Outline
+      {aiLoading ? 'Working…' : 'Generate Outline'}
       <ChevronDown className="w-3.5 h-3.5" />
     </button>
 
@@ -1429,7 +1551,7 @@ useEffect(() => {
             const selectedItems = allItems
               .filter(a => selected.has(a.key))
               .map(a => ({ verseRef: a.vRef, category: a.cat, ...a.item }))
-            onViewPrompt(selectedItems)
+            onViewPrompt(selectedItems, buildOptions())
           }}
           className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors"
         >
@@ -1442,7 +1564,7 @@ useEffect(() => {
             setShowGenerateMenu(false)
             handleGenerate()
           }}
-          disabled={aiLoading}
+          disabled={aiLoading || (scope === 'selected_verses' && selectedVerseRefs.length === 0)}
           className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
         >
           {aiLoading ? 'Drafting…' : 'Send to AI'}

@@ -62,18 +62,18 @@ export class OpenAIProvider implements AIProvider {
     // Strip markdown fences if the model wraps its JSON response
     const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
 
-    let parsed: unknown
+    let parsed: unknown | null = null
+    let parse_error: string | undefined
     try {
       parsed = JSON.parse(cleaned)
     } catch {
-      throw new AIError(
-        'malformed_response',
-        `Could not parse OpenAI response as JSON. Raw: ${cleaned.slice(0, 200)}`
-      )
+      parse_error = `Could not parse OpenAI response as JSON. Raw: ${cleaned.slice(0, 200)}`
     }
 
     return {
+      raw_text: raw,
       parsed,
+      parse_error,
       model: creds.model,
       provider: 'openai',
       duration_ms: Date.now() - start,
